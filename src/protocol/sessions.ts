@@ -142,7 +142,8 @@ export function installCommand(): string {
     [
       'command -v curl >/dev/null 2>&1 || exit 91',
       'T="$(mktemp)"',
-      `curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 ${INSTALLER_URL} -o "$T" || { rm -f "$T"; exit 92; }`,
+      // HTTPS only (no redirect to http) and TLS 1.2+; the installer then verifies the binary's sha256.
+      `curl -fsSL --proto =https --tlsv1.2 --retry 2 --connect-timeout 10 --max-time 60 ${INSTALLER_URL} -o "$T" || { rm -f "$T"; exit 92; }`,
       'sh "$T"; R=$?; rm -f "$T"; exit $R',
     ].join('; '),
   );

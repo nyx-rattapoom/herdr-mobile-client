@@ -405,6 +405,7 @@ export default function App() {
               <SetupCard
                 state={route.setup}
                 host={route.server.host}
+                user={route.server.username}
                 onInstall={() => void runSetup(route.server, 'install')}
                 onStart={() => void runSetup(route.server, 'start')}
               />

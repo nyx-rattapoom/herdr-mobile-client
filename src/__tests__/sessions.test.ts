@@ -52,6 +52,7 @@ describe('server scripts', () => {
   it('install downloads the official installer before running it', () => {
     const c = body(installCommand());
     expect(c).toContain('https://herdr.dev/install.sh -o "$T"');
+    expect(c).toContain('--proto =https --tlsv1.2');
     expect(c.indexOf('exit 92')).toBeLessThan(c.indexOf('sh "$T"'));
   });
 });
