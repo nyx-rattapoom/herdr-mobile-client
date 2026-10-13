@@ -17,14 +17,14 @@ import {
   stopBackgroundMonitoring,
   type AlertTarget,
 } from './src/notify';
-import type { PaneNode } from './src/protocol/snapshot';
+import { resolveSelection, selectionForPane, type Selection } from './src/live/workspace';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { HostKeyScreen } from './src/screens/HostKeyScreen';
 import { ActionSheet, PromptDialog } from './src/screens/dialogs';
 import { InputBar } from './src/screens/InputBar';
-import { PaneScreen } from './src/screens/PaneScreen';
 import { ServerFormScreen } from './src/screens/ServerFormScreen';
 import { SessionsScreen, type SessionEntry, type TreeTarget } from './src/screens/SessionsScreen';
+import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
@@ -49,7 +49,12 @@ type Route =
       previous: ForgottenPin | null;
     }
   | { name: 'sessions'; server: ServerProfile; entries: SessionEntry[]; herdrFound: boolean; setup?: SetupState }
-  | { name: 'pane'; parent: Extract<Route, { name: 'sessions' }>; live: LiveSession; pane: PaneNode };
+  | { name: 'workspace'; parent: SessionsRoute; live: LiveSession; session: string; sel: Selection };
+
+type SessionsRoute = Extract<Route, { name: 'sessions' }>;
+
+/** With one running session and nothing to set up, the session list is skipped. */
+const skipsSessions = (r: SessionsRoute) => !r.setup && r.entries.filter((e) => e.live).length === 1;
 
 /** Thrown when the user cancelled the connection attempt that is still running. */
 class Cancelled extends Error {}
@@ -103,7 +108,13 @@ export default function App() {
   const handleAlert = useCallback((server: ServerProfile, session: string, live: LiveSession, a: AgentAlert) => {
     if (!deduper.current.accept(a, `${server.id}|${session}`)) return;
     const r = routeRef.current;
-    if (AppState.currentState === 'active' && r.name === 'pane' && r.live === live && r.pane.pane_id === a.paneId) return;
+    if (
+      AppState.currentState === 'active' &&
+      r.name === 'workspace' &&
+      r.live === live &&
+      resolveSelection(live.getState().tree, r.sel).pane?.pane_id === a.paneId
+    )
+      return;
     const ws = live.getState().tree.find((w) => w.workspace_id === a.workspaceId);
     const { title, body } = formatAlert(a, { server: server.label, session, workspaceLabel: ws?.label });
     void postAgentNotification(title, body, { serverId: server.id, session, paneId: a.paneId });
@@ -112,19 +123,19 @@ export default function App() {
   /** Navigates to the pane named by a tapped notification, if it is loaded. */
   const openTarget = useCallback((t: AlertTarget): boolean => {
     const r = routeRef.current;
-    const parent = r.name === 'sessions' ? r : r.name === 'pane' ? r.parent : null;
+    const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
     if (!parent || parent.server.id !== t.serverId) return false;
     const live = parent.entries.find((e) => e.session.name === t.session)?.live;
-    const pane = live?.getState().snapshot?.panes.find((p) => p.pane_id === t.paneId);
-    if (!live || !pane) return false;
-    setRoute({ name: 'pane', parent, live, pane });
+    const sel = live ? selectionForPane(live.getState().tree, t.paneId) : null;
+    if (!live || !sel) return false;
+    setRoute({ name: 'workspace', parent, live, session: t.session, sel });
     return true;
   }, []);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (route.name === 'servers') return false;
-      if (route.name === 'pane') setRoute(route.parent);
+      if (route.name === 'workspace' && !skipsSessions(route.parent)) setRoute(route.parent);
       else home();
       return true;
     });
@@ -157,10 +168,12 @@ export default function App() {
   }, [handleAlert]);
 
   /** Shows a sessions route and handles a notification tap that arrived before it was connected. */
-  const showSessions = useCallback((route: Extract<Route, { name: 'sessions' }>) => {
+  const showSessions = useCallback((route: SessionsRoute) => {
     const { server, entries } = route;
-    setRoute(route);
-    routeRef.current = route;
+    const only = skipsSessions(route) ? entries.find((e) => e.live) : undefined;
+    const next: Route = only?.live ? { name: 'workspace', parent: route, live: only.live, session: only.session.name, sel: {} } : route;
+    setRoute(next);
+    routeRef.current = next;
     startBackgroundMonitoring(`Watching agents on ${server.label}`);
     // A notification tap that arrived before this server was connected.
     const tap = pendingTap.current;
@@ -354,7 +367,15 @@ export default function App() {
   const runAction = useCallback(async (live: LiveSession, target: Target, action: ActionId, label?: string) => {
     try {
       const req = actionRequest(action, target, { label });
-      await live.request(req.method, req.params);
+      const res = await live.request<{ tab?: { tab_id?: string }; workspace?: { workspace_id?: string } }>(req.method, req.params);
+      // Show what was just created; Herdr was asked not to focus it.
+      const sel: Selection | null =
+        action === 'tab.create' && res?.tab?.tab_id
+          ? { workspaceId: target.kind === 'workspace' ? target.node.workspace_id : undefined, tabId: res.tab.tab_id }
+          : action === 'workspace.create' && res?.workspace?.workspace_id
+            ? { workspaceId: res.workspace.workspace_id }
+            : null;
+      if (sel) setRoute((r) => (r.name === 'workspace' && r.live === live ? { ...r, sel } : r));
     } catch (e) {
       Alert.alert('Action failed', describeActionError(e));
     }
@@ -479,9 +500,9 @@ export default function App() {
           title={route.server.label}
           entries={route.entries}
           herdrFound={route.herdrFound}
-          onOpenPane={(session, pane) => {
+          onOpenSession={(session) => {
             const live = route.entries.find((e) => e.session.name === session)?.live;
-            if (live) setRoute({ name: 'pane', parent: route, live, pane });
+            if (live) setRoute({ name: 'workspace', parent: route, live, session, sel: {} });
           }}
           onAction={(t) => onTreeAction(route.entries, t)}
           banner={
@@ -504,19 +525,31 @@ export default function App() {
         />
       );
       break;
-    case 'pane':
+    case 'workspace': {
+      const r = route;
+      const agentOf = (paneId: string) => r.live.getState().agents.get(paneId);
       screen = (
-        <PaneScreen
-          live={route.live}
-          paneId={route.pane.pane_id}
-          title={`${route.pane.pane_id} ${route.pane.terminal_title_stripped ?? ''}`.trim()}
-          onBack={() => setRoute(route.parent)}
-          footer={(pokeNow, blank) => (
+        <WorkspaceScreen
+          live={r.live}
+          session={r.session}
+          host={`${r.parent.server.username}@${r.parent.server.host}`}
+          sel={r.sel}
+          onSelect={(sel) => setRoute((cur) => (cur.name === 'workspace' && cur.live === r.live ? { ...cur, sel } : cur))}
+          onBack={() => (skipsSessions(r.parent) ? home() : setRoute(r.parent))}
+          onReconnect={() => {
+            const server = r.parent.server;
+            home();
+            void open(server);
+          }}
+          onAction={(target) => setSheet({ live: r.live, target })}
+          onPick={(target, id) => pickAction(r.live, target, id)}
+          footer={(paneId, pokeNow, blank) => (
             <InputBar
-              live={route.live}
-              paneId={route.pane.pane_id}
-              hasAgent={Boolean(route.live.getState().agents.get(route.pane.pane_id)?.agent ?? route.pane.agent)}
-              agentBlocked={route.live.getState().agents.get(route.pane.pane_id)?.status === 'blocked'}
+              key={paneId}
+              live={r.live}
+              paneId={paneId}
+              hasAgent={Boolean(agentOf(paneId)?.agent ?? r.live.getState().snapshot?.panes.find((p) => p.pane_id === paneId)?.agent)}
+              agentBlocked={agentOf(paneId)?.status === 'blocked'}
               onSent={pokeNow}
               paneBlank={blank}
             />
@@ -524,6 +557,7 @@ export default function App() {
         />
       );
       break;
+    }
   }
 
   return (

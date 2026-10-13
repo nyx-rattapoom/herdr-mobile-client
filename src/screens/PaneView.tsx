@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   Text,
@@ -16,7 +15,7 @@ import { layoutLine, type GridLine } from '../live/grid';
 import { usePaneOutput } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
-import { ErrorBox, Header, colors, styles } from './ui';
+import { ErrorBox, colors, styles } from './ui';
 
 const FONT_SIZE = 12;
 const PAD = 8;
@@ -24,14 +23,13 @@ const PAD = 8;
 type Props = {
   live: LiveSession;
   paneId: string;
-  title: string;
-  onBack: () => void;
   /** Rendered under the output (M3 input bar). */
   /** `blank`: output was read and nothing is drawn yet. */
   footer?: (pokeNow: () => void, blank: boolean) => React.ReactNode;
 };
 
-export function PaneScreen({ live, paneId, title, onBack, footer }: Props) {
+/** A pane's output, followed live, with an optional footer (the composer). */
+export function PaneView({ live, paneId, footer }: Props) {
   const { output, error, reader } = usePaneOutput(live, paneId);
   const lines = useMemo(() => {
     const parsed = parseAnsi(output?.text ?? '');
@@ -54,9 +52,7 @@ export function PaneScreen({ live, paneId, title, onBack, footer }: Props) {
   };
 
   return (
-    // Edge-to-edge Android doesn't resize the window for the keyboard; pad instead.
-    <KeyboardAvoidingView style={styles.screen} behavior="padding" testID="pane">
-      <Header title={title} onBack={onBack} />
+    <View style={{ flex: 1 }} testID="pane">
       {error ? (
         <View style={{ paddingHorizontal: 16 }}>
           <ErrorBox message={error} />
@@ -116,6 +112,6 @@ export function PaneScreen({ live, paneId, title, onBack, footer }: Props) {
         </Pressable>
       ) : null}
       {footer?.(() => reader?.pokeNow(), blank)}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
