@@ -8,6 +8,7 @@ import {
   installCommand,
   parseDiscovery,
   parseSessionList,
+  SAFE_SERVER_PATH,
   shellQuote,
   startServerCommand,
   validateHerdrPath,
@@ -29,6 +30,15 @@ describe('server scripts', () => {
       expect(c.startsWith("sh -c '")).toBe(true);
       expect(body(c)).not.toContain("'");
     }
+  });
+
+  it('are single-line (csh/tcsh reject newlines inside quotes)', () => {
+    for (const c of [discoveryCommand(), installCommand(), startServerCommand('/opt/h/herdr')]) expect(c).not.toContain('\n');
+  });
+
+  it('only accepts plain absolute server paths for shell probes', () => {
+    expect(SAFE_SERVER_PATH.test('/home/u/.config/herdr/herdr.sock')).toBe(true);
+    for (const bad of ["/x'y", '/x y', '/x;id', '/x$(id)', 'rel/x', '/x\ny', '/x`id`']) expect(SAFE_SERVER_PATH.test(bad)).toBe(false);
   });
 
   it('are valid POSIX shell (sh -n)', () => {

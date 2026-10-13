@@ -43,10 +43,17 @@ export function findHerdrScript(herdrPath?: string): string {
   ].join('; ');
 }
 
+/**
+ * Wraps a POSIX script for whatever login shell sshd uses. Single quotes and newlines are
+ * forbidden: csh/tcsh reject newlines inside quotes, and quotes would end the wrapper.
+ */
 const wrap = (script: string) => {
-  if (script.includes("'")) throw new Error('script must not contain single quotes');
+  if (/['\n]/.test(script)) throw new Error('script must not contain single quotes or newlines');
   return `sh -c '${script}'`;
 };
+
+/** Server-supplied paths that are safe to put in a shell command; anything else is not probed. */
+export const SAFE_SERVER_PATH = /^\/[A-Za-z0-9_./+-]+$/;
 
 /** Read-only discovery: where herdr is, the env the socket path depends on, and its session list. */
 export function discoveryCommand(herdrPath?: string): string {
@@ -158,10 +165,11 @@ export function startServerCommand(herdrPath?: string): string {
       'S="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/herdr.sock"',
       '[ -S "$S" ] && exit 0',
       'cd "$HOME"',
-      'nohup "$H" server </dev/null >/dev/null 2>&1 &',
+      // Braces end the background command; a bare "&;" is a syntax error.
+      '{ nohup "$H" server </dev/null >/dev/null 2>&1 & }',
       'i=0; while [ $i -lt 20 ]; do [ -S "$S" ] && exit 0; sleep 0.5; i=$((i+1)); done',
       'exit 94',
-    ].join('\n'), // newline-separated: "&;" would be a syntax error
+    ].join('; '),
   );
 }
 

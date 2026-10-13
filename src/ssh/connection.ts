@@ -7,7 +7,7 @@ import {
   installCommand,
   parseDiscovery,
   startServerCommand,
-  shellQuote,
+  SAFE_SERVER_PATH,
   type DiscoveryResult,
   type InstallOutcome,
 } from '../protocol/sessions';
@@ -99,8 +99,10 @@ export class ServerConnection {
    */
   private async explainOpenFailure(e: unknown, socketPath: string): Promise<unknown> {
     if ((e as { code?: string })?.code !== 'ERR_SOCKET_UNAVAILABLE') return e;
+    // The path comes from the server; only probe paths that need no quoting in any shell.
+    if (!SAFE_SERVER_PATH.test(socketPath)) return e;
     try {
-      const res = await HerdrSsh.exec(this.sessionId, `test -S ${shellQuote(socketPath)} && echo SOCKET_EXISTS`);
+      const res = await HerdrSsh.exec(this.sessionId, `test -S ${socketPath} && echo SOCKET_EXISTS`);
       if (res.stdout.includes('SOCKET_EXISTS')) {
         return Object.assign(new Error(FORWARDING_PROHIBITED_TEXT), {
           code: 'ERR_FORWARDING_PROHIBITED',
