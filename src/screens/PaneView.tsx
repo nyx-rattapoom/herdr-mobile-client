@@ -10,7 +10,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
-import { parseAnsi } from '../live/ansi';
+import { parseAnsi, type Line } from '../live/ansi';
 import { layoutLine, type GridLine } from '../live/grid';
 import { usePaneOutput } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
@@ -25,7 +25,8 @@ type Props = {
   paneId: string;
   /** Rendered under the output (M3 input bar). */
   /** `blank`: output was read and nothing is drawn yet. */
-  footer?: (pokeNow: () => void, blank: boolean) => React.ReactNode;
+  /** `screen`: the parsed output lines, for reading what the agent asks. */
+  footer?: (pokeNow: () => void, blank: boolean, screen: Line[]) => React.ReactNode;
   /** Floating controls drawn over the output (e.g. the / button). */
   overlay?: (pokeNow: () => void) => React.ReactNode;
 };
@@ -33,12 +34,13 @@ type Props = {
 /** A pane's output, followed live, with an optional footer (the composer). */
 export function PaneView({ live, paneId, footer, overlay }: Props) {
   const { output, error, reader } = usePaneOutput(live, paneId);
-  const lines = useMemo(() => {
-    const parsed = parseAnsi(output?.text ?? '');
+  const parsed = useMemo(() => {
+    const p = parseAnsi(output?.text ?? '');
     // pane.read output ends with the cursor line; drop a trailing empty line.
-    if (parsed.length > 1 && parsed[parsed.length - 1].length === 0) parsed.pop();
-    return parsed.map((l) => layoutLine(l, TERM_FG, TERM_BG));
+    if (p.length > 1 && p[p.length - 1].length === 0) p.pop();
+    return p;
   }, [output?.text]);
+  const lines = useMemo(() => parsed.map((l) => layoutLine(l, TERM_FG, TERM_BG)), [parsed]);
   const blank = output !== null && lines.every((l) => l.items.length === 0 && l.bg.length === 0);
   const cols = useMemo(() => lines.reduce((n, l) => Math.max(n, l.cols), 0), [lines]);
   const { metrics, probe } = useCellMetrics(FONT_SIZE);
@@ -116,7 +118,7 @@ export function PaneView({ live, paneId, footer, overlay }: Props) {
         ) : null}
         {overlay?.(() => reader?.pokeNow())}
       </View>
-      {footer?.(() => reader?.pokeNow(), blank)}
+      {footer?.(() => reader?.pokeNow(), blank, parsed)}
     </View>
   );
 }

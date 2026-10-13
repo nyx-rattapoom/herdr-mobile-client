@@ -3,8 +3,10 @@ import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, Vi
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SPECIAL_KEYS, describeActionError, inputRequest, keyRequest } from '../live/actions';
+import type { Line } from '../live/ansi';
 import { getDraft, setDraft } from '../live/drafts';
 import type { LiveSession } from '../live/LiveSession';
+import { QuickAnswers } from './QuickAnswers';
 import { colors, styles } from './ui';
 
 type Props = {
@@ -20,6 +22,11 @@ type Props = {
   onSent: () => void;
   /** The pane has nothing on screen yet. */
   paneBlank?: boolean;
+  /** The pane's parsed output, for answer options while the agent is blocked. */
+  screen?: Line[];
+  agentName?: string;
+  /** Called after a quick answer was sent. */
+  onAnswered?: (label: string) => void;
 };
 
 type Mode = 'submit' | 'type' | 'prompt';
@@ -30,7 +37,18 @@ const modeLabel: Record<Mode, string> = { submit: 'Line ⏎', type: 'Text only',
  * behind the ⌨ button. The draft is kept per pane while the app runs; the expand button opens a
  * full-screen editor on the same draft.
  */
-export function Composer({ live, paneId, draftKey, hasAgent, agentBlocked, onSent, paneBlank }: Props) {
+export function Composer({
+  live,
+  paneId,
+  draftKey,
+  hasAgent,
+  agentBlocked,
+  onSent,
+  paneBlank,
+  screen,
+  agentName,
+  onAnswered,
+}: Props) {
   const [text, setTextState] = useState(() => getDraft(draftKey));
   const [mode, setMode] = useState<Mode>(hasAgent && !agentBlocked ? 'prompt' : 'submit');
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +102,16 @@ export function Composer({ live, paneId, draftKey, hasAgent, agentBlocked, onSen
 
   return (
     <View style={bar.wrap} testID="input-bar">
+      {agentBlocked && screen ? (
+        <QuickAnswers
+          live={live}
+          paneId={paneId}
+          agent={agentName}
+          screen={screen}
+          onSent={onSent}
+          onAnswered={onAnswered}
+        />
+      ) : null}
       {error ? (
         <Text testID="input-error" style={[styles.muted, { color: colors.danger, marginBottom: 6 }]}>
           {error}

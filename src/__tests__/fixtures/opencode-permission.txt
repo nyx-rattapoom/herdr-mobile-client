@@ -1,0 +1,22 @@
+  ┃
+  ┃  Run the shell command: ls -la ~/demo and show
+  ┃  me the output.
+  ┃
+
+     + Thought: 96ms
+
+     $ ls -la ~/demo
+
+     ▣  Build · Big Pickle
+
+  ┃
+  ┃  △ Permission required
+  ┃    # Shell command
+  ┃
+  ┃  $ ls -la ~/demo
+  ┃
+  ┃
+  ┃   Allow once   Allow always   Reject
+  ┃
+  ┃  ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃

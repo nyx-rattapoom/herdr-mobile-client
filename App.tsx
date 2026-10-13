@@ -568,7 +568,7 @@ export default function App() {
           onViewPane={onViewPane}
           onAction={(target) => setSheet({ live: r.live, target })}
           onPick={(target, id) => pickAction(r.live, target, id)}
-          footer={(paneId, pokeNow, blank) => (
+          footer={(paneId, pokeNow, blank, screen) => (
             <Composer
               key={paneId}
               live={r.live}
@@ -578,6 +578,8 @@ export default function App() {
               agentBlocked={agentOf(paneId)?.status === 'blocked'}
               onSent={pokeNow}
               paneBlank={blank}
+              screen={screen}
+              agentName={agentOf(paneId)?.agent}
             />
           )}
         />

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { ActionId, Target } from '../live/actions';
+import type { Line } from '../live/ansi';
 import { useLive } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import {
@@ -39,7 +40,7 @@ type Props = {
   viewed: Record<string, number>;
   /** Called when a pane is shown and when it stops being shown. */
   onViewPane: (paneId: string) => void;
-  footer?: (paneId: string, pokeNow: () => void, blank: boolean) => ReactNode;
+  footer?: (paneId: string, pokeNow: () => void, blank: boolean, screen: Line[]) => ReactNode;
 };
 
 /**
@@ -151,7 +152,7 @@ export function WorkspaceScreen(p: Props) {
           key={pane.pane_id}
           live={p.live}
           paneId={pane.pane_id}
-          footer={p.footer ? (poke, blank) => p.footer?.(pane.pane_id, poke, blank) : undefined}
+          footer={p.footer ? (poke, blank, screen) => p.footer?.(pane.pane_id, poke, blank, screen) : undefined}
           overlay={(poke) => (
             <SlashButton
               live={p.live}
