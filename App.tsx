@@ -7,7 +7,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { actionRequest, actionsFor, confirmText, describeActionError, targetName, type ActionId, type Target } from './src/live/actions';
 import type { AgentAlert } from './src/live/agents';
 import { AlertDeduper, formatAlert } from './src/live/alerts';
-import { CONNECT_STEPS, ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
+import { draftKey } from './src/live/drafts';
+import { ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
 import {
   onNotificationTap,
@@ -21,7 +22,7 @@ import { resolveSelection, selectionForPane, type Selection } from './src/live/w
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { HostKeyScreen } from './src/screens/HostKeyScreen';
 import { ActionSheet, PromptDialog } from './src/screens/dialogs';
-import { InputBar } from './src/screens/InputBar';
+import { Composer } from './src/screens/Composer';
 import { ServerFormScreen } from './src/screens/ServerFormScreen';
 import { SessionsScreen, type SessionEntry, type TreeTarget } from './src/screens/SessionsScreen';
 import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
@@ -568,10 +569,11 @@ export default function App() {
           onAction={(target) => setSheet({ live: r.live, target })}
           onPick={(target, id) => pickAction(r.live, target, id)}
           footer={(paneId, pokeNow, blank) => (
-            <InputBar
+            <Composer
               key={paneId}
               live={r.live}
               paneId={paneId}
+              draftKey={draftKey(r.parent.server.id, r.session, paneId)}
               hasAgent={Boolean(agentOf(paneId)?.agent ?? r.live.getState().snapshot?.panes.find((p) => p.pane_id === paneId)?.agent)}
               agentBlocked={agentOf(paneId)?.status === 'blocked'}
               onSent={pokeNow}
