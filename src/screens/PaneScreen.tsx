@@ -1,5 +1,13 @@
 import { memo, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Pressable,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import { parseAnsi, type Line, type Style } from '../live/ansi';
 import { usePaneOutput } from '../live/hooks';
@@ -55,7 +63,8 @@ export function PaneScreen({ live, paneId, title, onBack, footer }: Props) {
   };
 
   return (
-    <View style={styles.screen} testID="pane">
+    // Edge-to-edge Android doesn't resize the window for the keyboard; pad instead.
+    <KeyboardAvoidingView style={styles.screen} behavior="padding" testID="pane">
       <Header title={title} onBack={onBack} />
       {error ? (
         <View style={{ paddingHorizontal: 16 }}>
@@ -101,6 +110,6 @@ export function PaneScreen({ live, paneId, title, onBack, footer }: Props) {
         </Pressable>
       ) : null}
       {footer?.(() => reader?.pokeNow())}
-    </View>
+    </KeyboardAvoidingView>
   );
 }

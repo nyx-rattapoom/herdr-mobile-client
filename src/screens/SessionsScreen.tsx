@@ -60,10 +60,21 @@ function SessionCard({ entry, onOpenPane, onAction, onReconnect }: { entry: Sess
       testID={`session-${session.name}`}
       onLongPress={onAction && entry.live ? () => onAction({ kind: 'session', session: session.name }) : undefined}
     >
-      <Text style={[styles.text, { fontWeight: '700' }]}>
-        {session.name}
-        {session.isDefault ? ' (default)' : ''}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={[styles.text, { fontWeight: '700', flex: 1 }]}>
+          {session.name}
+          {session.isDefault ? ' (default)' : ''}
+        </Text>
+        {onAction && entry.live ? (
+          <Pressable
+            testID={`new-workspace-${session.name}`}
+            hitSlop={8}
+            onPress={() => onAction({ kind: 'session', session: session.name })}
+          >
+            <Text style={[styles.text, { color: colors.accent }]}>+ Workspace</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {!session.running ? <Text style={styles.muted}>not running</Text> : null}
       {entry.error ? <ErrorBox message={entry.error} /> : null}
       {entry.live ? (
