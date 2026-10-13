@@ -103,3 +103,61 @@ Emulator evidence (screenshots `m4-*`, cropped to this app's notifications):
 
 Known gap: a successful `agent.prompt` isn't exercised end to end. It needs a Herdr-detected agent CLI, and the test
 server has none (no API keys). It's covered by unit tests (`inputRequest`) and the error-path evidence in M3.
+
+## M5: key auth, install flow, biometrics, edit server, polish (2026-10-13)
+
+- **Device key** (`Keys.kt`, `src/store/deviceKey.ts`, Settings screen): an Ed25519 key pair generated on the phone
+  with JSch + Bouncy Castle. The private key (OpenSSH v1) lives only in Keystore-backed storage. The public key is
+  shown with Copy / Share / Regenerate (regenerate asks for confirmation). Server auth can be **Device key** (the
+  default for new servers, with the saved password as optional fallback) or **Password**. With both, JSch tries
+  publickey first. A wrong password is tried exactly once, not retried until sshd's MaxAuthTries.
+- **Edit server** (long-press → Edit): every field, the auth method, the password (empty keeps it, or
+  "Remove saved password") and an optional herdr path.
+- **Herdr discovery** (closes the M1 PATH-guess issue), in order: the configured herdr path (strictly validated so
+  it can't inject shell) → `command -v herdr` → the login shell (`$SHELL -lc "command -v herdr"`) → the official
+  installer's default `~/.local/bin/herdr`.
+- **Install / start**: when herdr is missing, the sessions screen offers **Install Herdr**. It downloads the official
+  `https://herdr.dev/install.sh` to a temp file and runs it with `sh` (installs into ~/.local/bin for the user), then
+  starts a detached `herdr server` and waits for its socket. Failure reasons: no curl, can't reach herdr.dev, the
+  installer's own `✗` messages (unsupported OS/arch, checksum, …), and server didn't start. When herdr is installed but
+  not running: **Start Herdr**. Every generated script is checked with `sh -n` in tests.
+- **Forwarding refused**: OpenSSH reports `AllowStreamLocalForwarding no` with the same generic failure as a missing
+  socket. The app checks `test -S <socket>` over exec. If the socket exists, it shows "sshd doesn't allow Unix-socket
+  forwarding (AllowStreamLocalForwarding)…" and stops retrying.
+- **Biometric unlock** (Settings toggle): passwords and the device private key move into one SecureStore item that
+  requires user authentication (`requireAuthentication`, own Keystore alias). One fingerprint prompt unlocks it, and it
+  re-locks when the app goes to the background. Turning it off moves them back. Cancel and invalidation (changed
+  biometrics) get clear messages.
+- **Polish**: a monochrome notification icon (expo-notifications plugin), also used by the foreground-service
+  notification. Agent panes default to Line mode while the agent is blocked. Server rows show the auth method.
+
+Emulator evidence (screenshots `m5-*`):
+1. Settings → Create device key → `ssh-ed25519 AAAA… herdr-client`, "Public key copied" (`m5-01`). The key was
+   added to herdr-test's authorized_keys, and the server was edited to Device key (`m5-02`, `m5-03`). Connecting gives sshd
+   `Accepted publickey … ED25519 SHA256:…`, which equals `ssh-keygen -lf` of the device key (`m5-04`).
+2. Key removed from authorized_keys → `Accepted password` (fallback). Wrong password + no key → "Authentication
+   failed. Check the user and password, or that the device public key is in ~/.ssh/authorized_keys…" (`m5-05`). sshd
+   logs exactly one `Failed password`. (Before the fix, JSch retried until "Too many authentication failures".)
+3. herdr-test-nofwd (2223): fingerprint Q2N8…6lw → *offline* with the AllowStreamLocalForwarding message (`m5-06`).
+   sshd logs `refused streamlocal port forward`.
+4. herdr-test-noherdr (2224), fresh container: "Herdr is not installed" → Install → herdr 0.9.3 installed and server
+   started → *● live* (`m5-07`–`m5-09`). With `herdr.dev` pointed at 127.0.0.1 in the container: "The server could not
+   download the installer from https://herdr.dev/install.sh. Check its internet access, proxy or firewall." (`m5-10`).
+   After restoring the network, "Try again" → *● live*. With the server stopped: "Herdr is not running" → Start →
+   *● live*.
+5. Biometrics (temporary emulator PIN + fingerprint, removed afterwards): enable → system prompt "Protect saved
+   credentials" (`m5-11`, `m5-12`). Connecting asks "Unlock saved server credentials" (`m5-13`). Cancel → "Unlock
+   cancelled…" (`m5-14`). A fingerprint touch → *● live*. Disabled again → connects without a prompt.
+6. Notification with the new icon (`m5-15`).
+
+Tests: jest (protocol, live session, actions, alerts, discovery and scripts, stores, secrets vault, device key) and
+JVM (`PinnedHostKeyRepositoryTest`, `KeysTest`, and `StreamLocalIntegrationTest` with pin mismatch, stream-local
+ping and device-key login against test/server).
+
+Open / future:
+- **M6 (paired-device mode)** is not implemented. It's optional per SPEC. It's the only way to get alerts when the app
+  process is dead (see the M4 limits).
+- Successful `agent.prompt` isn't exercised end to end (no Herdr-detected agent CLI on the test server).
+- Biometric-protected credentials were tested on the Android 11 emulator only. Keystore invalidation after a
+  biometric change is handled by message but wasn't reproduced.
+- iOS is not started (the native module is Android-only).
