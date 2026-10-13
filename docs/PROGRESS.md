@@ -289,3 +289,46 @@ Known limits:
 - Quick-answer and slash parsers are heuristics, tested on opencode and synthetic shapes only.
 - Drafts aren't persisted across app restarts (they may hold secrets typed for a prompt).
 - The rotate and side-panel layout was checked on a phone in landscape only, not on a tablet.
+
+## Batch 2: key bar, status pill, prompt queue, pin/mute/snooze (2026-10-13)
+
+Emulator checks were against `herdr-test-agent` (:2225).
+
+**A. Key bar** (b9cbb51).
+- One-shot **Ctrl** and **Alt**: they apply to the next special key (`ctrl+left`) or the next character typed in the input, which goes to the pane as a key combination (`alt+period`, `ctrl+u`) instead of into the input; then they reset. Herdr's key-combo names were checked in its source at v0.8.0 and current (punctuation is named: `period`, `slash`…).
+- **Paste** sends the clipboard with CRLF normalised, control characters other than newline and tab removed (escape sequences included), capped at 64 KB, and says what changed.
+- **Esc Esc** and **⇧Tab** lead the special keys. The bar stays one horizontally scrolling row.
+- Emulator: in a shell pane, Alt+`.` inserted bash's last argument, Ctrl+`u` cleared the line, Ctrl+`l` cleared the screen, and Paste typed the 93-character device public key. On opencode, ⇧Tab switched Build ↔ Plan.
+- Screenshots: `keybar-ctrl-armed.png`, `keybar-paste.png`, `keybar-shift-tab.png`.
+
+**B. Status pill** (b887183): floats top-centre over the output, clear of the bottom-right / button.
+- It shows working with elapsed time (from the status event the phone saw), needs you, reconnecting, or offline/unsupported. Connection states retry on tap.
+- Emulator: "Working · 2s" → "Working · 6s"; "Needs you" on the blocked w2:p1; "Reconnecting… tap to retry" while the sshd session was killed.
+- Screenshots: `pill-working.png`, `pill-needs-you.png`, `pill-reconnecting.png`.
+
+**C. Prompt queue** (266dec2).
+- In agent-prompt mode, a prompt sent while the agent is working or blocked (or while earlier prompts still wait) joins a per-pane queue under the composer. Each item can be edited, moved up/down, deleted or sent now.
+- When the agent goes idle or done, the first item is sent. The next waits until the agent has worked and finished again, or 20 s pass without it starting.
+- The queue pauses while disconnected and while the agent is blocked, so it never answers a question.
+- Queues are stored per server profile, session and pane in chunks under 2 KB, run for panes that aren't on screen, and are dropped when their pane closes.
+- Emulator, while opencode worked:
+  - two prompts were queued, then reordered (beta before alpha);
+  - the app was force-stopped before either was sent;
+  - after a relaunch, beta went out first without the pane being opened, and alpha followed once the agent finished.
+  - A prompt queued on the blocked w2:p1 showed "Paused: the agent is waiting for an answer".
+  - Note: the free model on :2225 sometimes hangs "working"; Esc Esc interrupts it.
+- Screenshots: `queue-two.png`, `queue-reordered.png`, `queue-paused-blocked.png`.
+
+**D. Pin, mute, snooze** (91baf08): long-pressing an agent (or a pane chip) adds Pin / Mute / Snooze… to the pane actions.
+- Pinned agents head the agents list in a Pinned group.
+- Muted panes post no notifications: w2:p1 went blocked again while muted and no alert was posted.
+- Snoozed panes leave the list and stay silent until 1 hour, tomorrow 9:00 or a chosen HH:MM. They come back by themselves: a custom snooze about a minute ahead reappeared in the open sheet at that minute. They can also be un-snoozed earlier from the Snoozed rows.
+- Marks are stored per server profile, session and pane and forgotten when the pane closes; pin and mute survived a force-stop.
+- Fixed while testing: the first tap on a sheet was lost after a long-press in the agents sheet. Closing a modal mid-gesture left React Native's touch responder on the removed view. Long-press now acts when the finger lifts, and a sheet that replaces another opens after it has closed.
+- Screenshots: `flags-actions.png`, `flags-pinned.png`, `flags-snooze-presets.png`, `flags-snoozed.png`, `flags-snooze-ended.png`.
+
+The test environment on :2225 is restored:
+- the temporary `~/demo/opencode.json` (bash: ask) is removed;
+- opencode in w2:p1 was restarted without it;
+- the files the test prompts wrote are deleted;
+- each workspace has one tab again.
