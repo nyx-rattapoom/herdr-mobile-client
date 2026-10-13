@@ -230,3 +230,62 @@ Reported by black-box testing against a Mac running Herdr 0.7.5: the session rec
   - `herdr-too-old.png`: the session shows "not supported" with the alert. It stayed that way over 30 s and after Check again; it never showed reconnecting.
   - `herdr-too-old-continue.png`: after Continue anyway the session is live on 0.7.5. A tab created with the CLI showed up through events.
   - `herdr-current-ok.png`: `herdr-test-agent` (2225, 0.9.3) is live as before; `herdr-test` (2222) was live too.
+
+## UX overhaul: agent-supervision console (2026-10-13)
+
+Requested as a feature batch. Everything was checked on the emulator against `herdr-test-agent` (:2225, real opencode).
+
+1. **Connect progress** (72cea49): six steps with "Step n of 6", a progress bar, user@host and elapsed seconds.
+   - The steps: SSH handshake (host key probe), host key check (pin), authenticating, checking Herdr (`herdr --version`), listing sessions, loading the first snapshot.
+   - A failure names its step, e.g. "Step 6 of 6 · Loading snapshot failed: …AllowStreamLocalForwarding…" on the nofwd server.
+   - Cancel stops the attempt at its next step.
+   - Screenshots: `connect-progress.png` (a frame from a screen recording; the whole connect takes under a second), `connect-step-failed.png`.
+2. **Workspace-first navigation** (86fea10): after picking a session (skipped when there is only one), one workspace is shown at a time.
+   - The header is a workspace switcher plus a status line (state · user@host · herdr version).
+   - Tabs are chips with a status dot and a + chip.
+   - The selected tab's pane is shown inline, with pane chips when a tab has several.
+   - The switcher sheet lists every workspace with its rolled-up status and its agent and tab counts. Tap switches; long-press closes after confirmation; it can create a workspace.
+   - Selection is local: `herdr workspace list` / `pane list` showed desktop focus unchanged after switching workspaces and panes on the phone. Focus happens only through the explicit Focus actions.
+   - Screenshots: `workspace-main.png`, `workspace-switcher.png`, `workspace-panes.png`.
+3. **Agents sheet** (46e81f8): a header button with the agent count (amber while one needs you) opens every agent, grouped needs you → working → done → idle.
+   - Unseen done agents come first and are marked new. "Unseen" means the status changed after the pane was last opened. LiveSession records when it saw each status change; last-viewed times are stored per server profile, session and pane (capped at 200).
+   - Tap opens the pane; long-press closes it after confirmation.
+   - Herdr reports the desktop-focused pane as idle (not done) when it finishes, so "done" shows for agents in unfocused panes.
+   - Screenshots: `agents-button.png`, `agents-working.png`, `agents-unseen-done.png`.
+4. **Composer** (20a0718): multi-line input with Send, and Expand opens a full-screen editor on the same draft.
+   - Collapsing, dismissing the keyboard, switching panes or workspaces, and even leaving and reconnecting keep the draft. Drafts are in memory per server, session and pane; hidden input is never kept.
+   - Modes are unchanged; the special keys moved behind a keys button.
+   - The editor modal needed safe-area insets: edge-to-edge put its top bar under the status bar, where taps were lost.
+   - Screenshots: `composer-draft.png`, `composer-keys.png`, `composer-editor.png`.
+5. **Slash-command palette** (995783f): a draggable / button over the output.
+   - Tap types `/`, reads the agent's menu from the screen (`pane.read` visible text) and lists it.
+   - Load more moves the selection to the last command seen, then steps down and re-reads until the menu wraps. If a step jumps past the end, it walks back one row at a time so the last commands aren't skipped. On :2225 it loads all 28 opencode commands; a check stepping one row at a time from the CLI also finds 28.
+   - Choosing a command types the rest of it, then presses Enter as a separate request: opencode treats text plus Enter in one `pane.send_input` write as a paste and drops the `/`. `/help` opened opencode's help dialog.
+   - Closing sends Esc, plus Backspace if a lone `/` is left.
+   - Long-press opens special keys; a pane without an agent shows a disabled explanation.
+   - The parser is agent-agnostic: box borders, selection markers, dash/colon separators, name-only lists; paths and status lines don't match. Tests use menus captured on :2225 plus synthetic shapes.
+   - Screenshots: `slash-button.png`, `slash-palette.png`, `slash-palette-all.png`, `slash-keys.png`, `slash-disabled.png`.
+6. **Quick answers** (e315c15): while the agent is blocked, its options are parsed from the last screen and shown as buttons above the composer.
+   - Recognised shapes: numbered or lettered lists (↑/↓ from the marked option, or the key typed), button rows (←/→, with the highlighted button found by its background shade) and `[y/n]` prompts.
+   - Each answer is confirmed with the question's context. Without recognised options, Enter / Esc / ↑ / ↓ are offered.
+   - Tested on opencode's real permission prompt. For the test, `~/demo/opencode.json` on :2225 sets `bash: ask` (see below). "Reject" (→→⏎) rejected the command; "Allow once" ran `wc`.
+   - Screenshots: `quick-answers.png`, `quick-answers-confirm.png`.
+7. **Resume and reconnect** (ad3b73d): on returning to the foreground the app checks the SSH session with a cheap exec.
+   - If it is gone, the app reconnects in place with the pinned key and every live view retries. The screen, selection, drafts, last output and per-pane scroll position stay.
+   - A session dropped while the app is open reconnects the same way (at most every 10 s), and Reconnect now reconnects in place.
+   - The output list uses fixed row heights so a saved scroll position restores exactly (same top row after switching tabs).
+   - Tested by killing the user's sshd on :2225 with the app in the background and in the foreground.
+   - Screenshots: `resume-reconnecting.png` (the brief "not connected" while the dead session is detected), `resume-reconnected.png`, `resume-scroll-kept.png`.
+8. **Audit log** (a247d85): records closing a pane, tab or workspace, quick answers and continuing on an old Herdr, with time, server profile, target and action. Prompt text and secrets are never recorded.
+   - Entries are stored in pages of 10 under 2 KB each, capped at 200.
+   - Settings → Activity log shows them and can clear them after confirmation.
+   - Screenshot: `audit-log.png`.
+9. **Ongoing notification, landscape and tablets** (d5d7465): while connected, the foreground-service notification reads e.g. "opencode box: 1 working · 1 needs you" and updates with statuses, checked with `dumpsys notification`.
+   - Tapping it from the home screen opened the app on the agents sheet. This uses a VIEW intent to the launcher activity, which React Native reads as a Linking URL; **it needs the native rebuild**.
+   - The app now rotates (`orientation: default`). From 840 dp wide the agent list is a side panel, and on short screens the composer is shorter.
+   - Screenshots: `notification-opens-agents.png`, `landscape-agents-panel.png`.
+
+Known limits:
+- Quick-answer and slash parsers are heuristics, tested on opencode and synthetic shapes only.
+- Drafts aren't persisted across app restarts (they may hold secrets typed for a prompt).
+- The rotate and side-panel layout was checked on a phone in landscape only, not on a tablet.
