@@ -1,6 +1,15 @@
 import HerdrSsh from '../../modules/herdr-ssh';
 import { HerdrClient } from '../protocol/client';
-import { DISCOVERY_COMMAND, parseDiscovery, type DiscoveryResult } from '../protocol/sessions';
+import {
+  discoveryCommand,
+  explainInstall,
+  explainStart,
+  installCommand,
+  parseDiscovery,
+  startServerCommand,
+  type DiscoveryResult,
+  type InstallOutcome,
+} from '../protocol/sessions';
 import type { Transport } from '../protocol/transport';
 import type { HostKeyPin } from './pinning';
 
@@ -53,9 +62,21 @@ export class ServerConnection {
     return new ServerConnection(id);
   }
 
-  async discoverSessions(): Promise<DiscoveryResult> {
-    const res = await HerdrSsh.exec(this.sessionId, DISCOVERY_COMMAND);
+  async discoverSessions(herdrPath?: string): Promise<DiscoveryResult> {
+    const res = await HerdrSsh.exec(this.sessionId, discoveryCommand(herdrPath));
     return parseDiscovery(res.stdout);
+  }
+
+  /** Runs the official Herdr installer on the server (user-confirmed). */
+  async installHerdr(): Promise<InstallOutcome & { log: string }> {
+    const res = await HerdrSsh.exec(this.sessionId, installCommand());
+    return { ...explainInstall(res.exitCode, res.stdout, res.stderr), log: `${res.stdout}${res.stderr}` };
+  }
+
+  /** Starts a detached default-session server if none is running. */
+  async startHerdr(herdrPath?: string): Promise<InstallOutcome> {
+    const res = await HerdrSsh.exec(this.sessionId, startServerCommand(herdrPath));
+    return explainStart(res.exitCode);
   }
 
   async openHerdr(socketPath: string): Promise<HerdrClient> {
@@ -78,7 +99,7 @@ export function describeSshError(e: unknown): string {
     case 'ERR_HOSTKEY_MISMATCH':
       return 'The server host key does not match the pinned key. Connection blocked.';
     case 'ERR_AUTH':
-      return 'Authentication failed. Check the user and password.';
+      return 'Authentication failed. Check the user and password, or that the device public key is in ~/.ssh/authorized_keys on the server.';
     case 'ERR_TIMEOUT':
       return 'Connection timed out.';
     case 'ERR_FORWARDING_PROHIBITED':
