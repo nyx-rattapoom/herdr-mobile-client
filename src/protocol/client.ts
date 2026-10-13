@@ -13,6 +13,9 @@ export class HerdrApiError extends Error {
   }
 }
 
+/** A pushed line from an `events.subscribe` connection. */
+export type HerdrEvent = { event: string; data: Record<string, unknown> };
+
 type Pending = {
   resolve: (result: unknown) => void;
   reject: (err: Error) => void;
@@ -28,6 +31,9 @@ export class HerdrClient {
   private readonly pending = new Map<string, Pending>();
   private nextId = 1;
   private closedReason: string | null = null;
+  private eventHandler: (e: HerdrEvent) => void = () => {};
+  private streamErrorHandler: (e: HerdrApiError) => void = () => {};
+  private closeHandlers: ((reason: string) => void)[] = [];
 
   constructor(
     private readonly transport: Transport,
@@ -35,6 +41,28 @@ export class HerdrClient {
   ) {
     transport.onData((chunk) => this.handleData(chunk));
     transport.onClose((reason) => this.fail(new HerdrApiError('closed', `connection closed: ${reason}`)));
+  }
+
+  /** Pushed events (lines with an `event` field and no request id). */
+  onEvent(handler: (e: HerdrEvent) => void): void {
+    this.eventHandler = handler;
+  }
+
+  /**
+   * Errors for requests that already succeeded, e.g. `events_lost` on a subscription,
+   * after which the server closes the connection.
+   */
+  onStreamError(handler: (e: HerdrApiError) => void): void {
+    this.streamErrorHandler = handler;
+  }
+
+  onClose(handler: (reason: string) => void): void {
+    if (this.closedReason !== null) handler(this.closedReason);
+    else this.closeHandlers.push(handler);
+  }
+
+  get closed(): boolean {
+    return this.closedReason !== null;
   }
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -79,18 +107,20 @@ export class HerdrClient {
       return; // Not ours to interpret; Herdr only sends JSON lines.
     }
     if (typeof msg !== 'object' || msg === null) return;
-    const { id, result, error } = msg as { id?: unknown; result?: unknown; error?: unknown };
+    const { id, result, error, event, data } = msg as Record<string, unknown>;
+    if (typeof event === 'string' && id === undefined) {
+      this.eventHandler({ event, data: typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {} });
+      return;
+    }
     if (typeof id !== 'string') return;
+    const err = error !== undefined ? toApiError(error) : null;
     const p = this.settle(id);
-    if (!p) return;
-    if (error !== undefined) {
-      const e = (error ?? {}) as { code?: unknown; message?: unknown };
-      p.reject(
-        new HerdrApiError(
-          typeof e.code === 'string' ? e.code : 'unknown',
-          typeof e.message === 'string' ? e.message : 'request failed',
-        ),
-      );
+    if (!p) {
+      if (err) this.streamErrorHandler(err);
+      return;
+    }
+    if (err) {
+      p.reject(err);
     } else {
       p.resolve(result);
     }
@@ -106,7 +136,19 @@ export class HerdrClient {
   }
 
   private fail(err: HerdrApiError): void {
-    if (this.closedReason === null) this.closedReason = err.message;
+    if (this.closedReason !== null) return;
+    this.closedReason = err.message;
     for (const id of [...this.pending.keys()]) this.settle(id)?.reject(err);
+    const handlers = this.closeHandlers;
+    this.closeHandlers = [];
+    handlers.forEach((h) => h(err.message));
   }
+}
+
+function toApiError(error: unknown): HerdrApiError {
+  const e = (error ?? {}) as { code?: unknown; message?: unknown };
+  return new HerdrApiError(
+    typeof e.code === 'string' ? e.code : 'unknown',
+    typeof e.message === 'string' ? e.message : 'request failed',
+  );
 }

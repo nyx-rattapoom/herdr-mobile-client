@@ -47,3 +47,49 @@ export class MemoryKv implements KeyValueStore {
     this.map.delete(k);
   }
 }
+
+type Handler = (params: Record<string, unknown>) => unknown;
+
+/**
+ * In-memory Herdr server: each `open()` yields a HerdrClient over a FakeTransport whose
+ * requests are answered by per-method handlers. Throwing `{code, message}` returns an error.
+ */
+export class FakeHerdr {
+  connections: FakeTransport[] = [];
+  handlers: Record<string, Handler> = {};
+  failOpen: { code: string; message: string } | null = null;
+
+  constructor(private readonly makeClient: (t: FakeTransport) => import('../protocol/client').HerdrClient) {}
+
+  open = async () => {
+    if (this.failOpen) throw Object.assign(new Error(this.failOpen.message), this.failOpen);
+    const t = new FakeTransport();
+    const origWrite = t.write.bind(t);
+    t.write = async (d: string) => {
+      await origWrite(d);
+      for (const line of d.split('\n').filter(Boolean)) {
+        const { id, method, params } = JSON.parse(line);
+        setTimeout(() => {
+          const h = this.handlers[method];
+          try {
+            if (!h) throw { code: 'unknown_method', message: method };
+            t.push(JSON.stringify({ id, result: h(params) }) + '\n');
+          } catch (e) {
+            t.push(JSON.stringify({ id, error: e }) + '\n');
+          }
+        }, 0);
+      }
+    };
+    this.connections.push(t);
+    return this.makeClient(t);
+  };
+
+  /** Connections that have sent an events.subscribe. */
+  get subscriptions(): FakeTransport[] {
+    return this.connections.filter((c) => c.requests.some((r) => r.method === 'events.subscribe'));
+  }
+
+  emit(t: FakeTransport, event: string, data: Record<string, unknown>) {
+    t.push(JSON.stringify({ event, data }) + '\n');
+  }
+}
