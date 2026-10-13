@@ -3,7 +3,10 @@
 #   herdr pane run <pane> fake-agent [work_seconds]
 # Cycles: working -> blocked (waits for y/n on stdin) -> working -> idle (completed).
 set -eu
-H="${HERDR_BIN_PATH:-herdr}"; P="${HERDR_PANE_ID:?run inside a herdr pane}"; W="${1:-5}"; SEQ=0
+H="${HERDR_BIN_PATH:-herdr}"; P="${HERDR_PANE_ID:?run inside a herdr pane}"; W="${1:-5}"
+# Herdr drops reports whose seq is not above the last one accepted for this source+pane,
+# so seed from the clock (ms) to stay monotonic across runs.
+SEQ=$(date +%s%3N)
 report() { SEQ=$((SEQ+1)); "$H" pane report-agent --source fake-agent --agent fake --state "$1" --seq "$SEQ" ${2:+--message "$2"} "$P" >/dev/null; }
 report working "thinking"
 i=0; while [ $i -lt "$W" ]; do i=$((i+1)); echo "working... step $i/$W"; sleep 1; done
