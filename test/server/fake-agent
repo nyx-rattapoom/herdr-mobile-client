@@ -1,0 +1,17 @@
+#!/bin/sh
+# Fake agent for exercising agent status in the app. Run inside a Herdr pane:
+#   herdr pane run <pane> fake-agent [work_seconds]
+# Cycles: working -> blocked (waits for y/n on stdin) -> working -> idle (completed).
+set -eu
+H="${HERDR_BIN_PATH:-herdr}"; P="${HERDR_PANE_ID:?run inside a herdr pane}"; W="${1:-5}"; SEQ=0
+report() { SEQ=$((SEQ+1)); "$H" pane report-agent --source fake-agent --agent fake --state "$1" --seq "$SEQ" ${2:+--message "$2"} "$P" >/dev/null; }
+report working "thinking"
+i=0; while [ $i -lt "$W" ]; do i=$((i+1)); echo "working... step $i/$W"; sleep 1; done
+report blocked "approve file write?"
+printf 'Approve writing hello.txt? [y/n] '
+read -r ans
+case "$ans" in y|Y) echo "approved";; *) echo "denied";; esac
+report working "finishing"
+sleep 2
+echo "done."
+report idle "completed"
