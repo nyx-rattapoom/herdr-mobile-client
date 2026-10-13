@@ -57,6 +57,8 @@ export type LiveOptions = {
   onAlert?: (a: AgentAlert) => void;
   /** Clock for status-change times; tests replace it. */
   now?: () => number;
+  /** Called when the user chooses to connect to a server older than the minimum. */
+  onContinueAnyway?: (version?: string) => void;
 };
 
 /**
@@ -81,7 +83,8 @@ export class LiveSession {
   private dropped = new Set<string>();
   /** The first snapshot is a baseline: agents already blocked when we connect don't alert. */
   private baselined = false;
-  private readonly opts: Required<Omit<LiveOptions, 'onAlert'>> & Pick<LiveOptions, 'onAlert'>;
+  private readonly opts: Required<Omit<LiveOptions, 'onAlert' | 'onContinueAnyway'>> &
+    Pick<LiveOptions, 'onAlert' | 'onContinueAnyway'>;
 
   constructor(
     private readonly open: () => Promise<HerdrClient>,
@@ -94,6 +97,7 @@ export class LiveSession {
       fatalCodes: opts.fatalCodes ?? ['ERR_NO_SESSION'],
       onAlert: opts.onAlert,
       now: opts.now ?? Date.now,
+      onContinueAnyway: opts.onContinueAnyway,
     };
   }
 
@@ -148,6 +152,7 @@ export class LiveSession {
   /** Connects to a server whose Herdr is older than the minimum; some features may fail. */
   continueAnyway(): void {
     this.allowOld = true;
+    this.opts.onContinueAnyway?.(this.state.server?.version);
     this.retryNow();
   }
 

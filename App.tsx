@@ -35,10 +35,19 @@ import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import { endpointInUse, type ServerProfile } from './src/store/servers';
+import { AuditLog, type AuditEntry } from './src/store/audit';
 import { ViewedStore } from './src/store/viewed';
 import { plainKv, useAccount } from './src/useAccount';
 
 const viewedStore = new ViewedStore(plainKv);
+const audit = new AuditLog(plainKv);
+
+/** Destructive actions recorded in the audit log, with how they read there. */
+const AUDITED: Partial<Record<ActionId, string>> = {
+  'pane.close': 'close pane',
+  'tab.close': 'close tab',
+  'workspace.close': 'close workspace',
+};
 
 type Route =
   | { name: 'servers' }
@@ -86,6 +95,10 @@ export default function App() {
   const attempt = useRef(0);
   const progress = useRef<ConnectProgress | null>(null);
   const [viewed, setViewed] = useState<Record<string, number>>({});
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  useEffect(() => {
+    if (route.name === 'settings') void audit.list().then(setAuditEntries);
+  }, [route.name]);
   const viewedKey = route.name === 'workspace' ? [route.parent.server.id, route.session] as const : null;
   const viewedServer = viewedKey?.[0];
   const viewedSession = viewedKey?.[1];
@@ -128,6 +141,13 @@ export default function App() {
     stopBackgroundMonitoring();
     setRoute({ name: 'servers' });
   }, []);
+
+  /** The server profile a live view belongs to, from the current route. */
+  const serverOf = (live: LiveSession): ServerProfile | null => {
+    const r = routeRef.current;
+    const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
+    return parent?.entries.some((e) => e.live === live) ? parent.server : null;
+  };
 
   /** Posts a notification unless the user is already looking at that pane. */
   const handleAlert = useCallback((server: ServerProfile, session: string, live: LiveSession, a: AgentAlert) => {
@@ -191,6 +211,12 @@ export default function App() {
         // Retrying cannot fix a dead SSH session or an sshd that forbids socket forwarding.
         fatalCodes: ['ERR_NO_SESSION', 'ERR_FORWARDING_PROHIBITED'],
         onAlert: (a) => handleAlert(server, session.name, live, a),
+        onContinueAnyway: (version) =>
+          void audit.record({
+            server: server.label,
+            target: `session ${session.name}`,
+            action: `continue on old Herdr${version ? ` ${version}` : ''}`,
+          }),
       });
       lives.current.push(live);
       void live.start();
@@ -470,6 +496,9 @@ export default function App() {
             ? { workspaceId: res.workspace.workspace_id }
             : null;
       if (sel) setRoute((r) => (r.name === 'workspace' && r.live === live ? { ...r, sel } : r));
+      const what = AUDITED[action];
+      const server = serverOf(live);
+      if (what && server) void audit.record({ server: server.label, target: targetName(target), action: what });
     } catch (e) {
       Alert.alert('Action failed', describeActionError(e));
     }
@@ -565,6 +594,17 @@ export default function App() {
               { text: 'Regenerate', style: 'destructive', onPress: () => void settingsAction(account.regenerateKey, 'New device key created.') },
             ])
           }
+          audit={auditEntries}
+          onClearAudit={() =>
+            Alert.alert('Clear activity log', 'Delete every recorded action on this device?', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Clear',
+                style: 'destructive',
+                onPress: () => void audit.clear().then(() => setAuditEntries([])),
+              },
+            ])
+          }
           onToggleBiometric={(on) =>
             void settingsAction(() => account.setBiometric(on), on ? 'Credentials now require biometrics.' : 'Biometric protection turned off.')
           }
@@ -648,6 +688,9 @@ export default function App() {
               paneBlank={blank}
               screen={screen}
               agentName={agentOf(paneId)?.agent}
+              onAnswered={(label) =>
+                void audit.record({ server: r.parent.server.label, target: `pane ${paneId}`, action: `quick answer: ${label}` })
+              }
             />
           )}
         />

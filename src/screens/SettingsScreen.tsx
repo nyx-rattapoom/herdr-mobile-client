@@ -1,5 +1,6 @@
 import { ScrollView, Switch, Text, View } from 'react-native';
 
+import { MAX_ENTRIES, type AuditEntry } from '../store/audit';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
@@ -16,7 +17,50 @@ type Props = {
   onShareKey: () => void;
   onRegenerateKey: () => void;
   onToggleBiometric: (on: boolean) => void;
+  /** Newest first. */
+  audit: AuditEntry[];
+  onClearAudit: () => void;
 };
+
+const when = (t: number) => {
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Closes, quick answers and other approvals, recorded on this device only. */
+function ActivityLog({ entries, onClear }: { entries: AuditEntry[]; onClear: () => void }) {
+  return (
+    <View style={styles.card} testID="audit-log">
+      <Text style={styles.muted}>
+        Closed panes, tabs and workspaces, quick answers and other approvals, kept on this device (last {MAX_ENTRIES}).
+        Prompt text and secrets are never recorded.
+      </Text>
+      {entries.length === 0 ? (
+        <Text testID="audit-empty" style={[styles.text, { marginTop: 8 }]}>
+          Nothing recorded yet.
+        </Text>
+      ) : (
+        entries.slice(0, 50).map((e, i) => (
+          <View key={`${e.t}-${i}`} testID={`audit-${i}`} style={{ marginTop: 10 }}>
+            <Text style={styles.text}>
+              {e.action} · {e.target}
+            </Text>
+            <Text style={styles.muted}>
+              {when(e.t)} · {e.server}
+            </Text>
+          </View>
+        ))
+      )}
+      {entries.length > 50 ? <Text style={[styles.muted, { marginTop: 8 }]}>…and {entries.length - 50} older</Text> : null}
+      {entries.length ? (
+        <View style={{ marginTop: 12 }}>
+          <Button testID="audit-clear" label="Clear activity log" kind="secondary" onPress={onClear} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 export function SettingsScreen(p: Props) {
   return (
@@ -79,6 +123,9 @@ export function SettingsScreen(p: Props) {
           </View>
           <Switch testID="secure-screen-toggle" value={p.secureScreen} onValueChange={p.onToggleSecureScreen} />
         </View>
+
+        <Text style={[styles.text, { fontWeight: '700', marginTop: 8 }]}>Activity log</Text>
+        <ActivityLog entries={p.audit} onClear={p.onClearAudit} />
 
         <Text style={[styles.muted, { marginTop: 16 }]}>
           Herdr Client is an independent open-source app for Herdr servers. It talks to Herdr&apos;s public socket API over
