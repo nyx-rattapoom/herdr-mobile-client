@@ -5,13 +5,15 @@ cd "$(dirname "$0")"
 docker build -q -t herdr-test-server . >/dev/null
 docker build -q -t herdr-test-server:nofwd --build-arg STREAMLOCAL=no . >/dev/null
 docker build -q -t herdr-test-server:noherdr --build-arg INSTALL_HERDR=0 . >/dev/null
+docker build -q -t herdr-test-server:agent --build-arg INSTALL_OPENCODE=1 . >/dev/null
 start() { docker rm -f "$1" >/dev/null 2>&1 || true
   docker run -d --name "$1" -e REGEN_HOST_KEYS="${REGEN_HOST_KEYS:-0}" -p "127.0.0.1:$2:22" "$3" >/dev/null
   echo "$1 127.0.0.1:$2"; }
-for c in ${@:-herdr-test herdr-test-nofwd herdr-test-noherdr}; do
+for c in ${@:-herdr-test herdr-test-nofwd herdr-test-noherdr herdr-test-agent}; do
   case "$c" in
     herdr-test) start herdr-test 2222 herdr-test-server ;;
     herdr-test-nofwd) start herdr-test-nofwd 2223 herdr-test-server:nofwd ;;
     herdr-test-noherdr) start herdr-test-noherdr 2224 herdr-test-server:noherdr ;;
+    herdr-test-agent) start herdr-test-agent 2225 herdr-test-server:agent ;;
   esac
 done

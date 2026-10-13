@@ -58,8 +58,13 @@ Emulator evidence (screenshots `m3-*`):
 
 Open:
 - `agent.prompt` only accepts *named* agents that Herdr itself detects (claude, codex, …). The test fixture's
-  self-reported `fake` agent gets "agent w1:p1 is not an active named agent" (`m3-09`), so a successful
-  agent prompt is untested here. It needs a real agent CLI on the test server.
+  self-reported `fake` agent gets "agent w1:p1 is not an active named agent" (`m3-09`).
+- **Resolved 2026-10-13 (test infra):** `herdr-test-agent` (port 2225) runs real opencode on a free model.
+  Agent prompts from the app ran end to end: status idle → working → idle, and the files were created
+  on the server (`hello.txt`/`phone.txt`, `m3-10`; first prompt on a fresh server, `fresh.txt`, `m3-11`).
+  Caveat: Herdr lists opencode as idle before its TUI is drawn, and a prompt sent then is accepted
+  (`ok`) but lost. `herdr agent prompt` does the same, so it's not an app bug. While that pane was blank, the
+  pane view also showed "connection closed: eof" until reopened. Worth a look on the app side.
 - Fixture bug, reported to the test-infra owner: fake-agent restarts `--seq` at 1 on every run, and Herdr ignores
   reports whose seq isn't above the last one for the same source. So only the first run in a pane changes status.
 
