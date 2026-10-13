@@ -1,0 +1,246 @@
+package expo.modules.herdrssh
+
+import android.util.Base64
+import com.jcraft.jsch.ChannelDirectStreamLocal
+import com.jcraft.jsch.ChannelExec
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.JSchChangedHostKeyException
+import com.jcraft.jsch.JSchException
+import com.jcraft.jsch.JSchUnknownHostKeyException
+import com.jcraft.jsch.Session
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.exception.CodedException
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.ByteArrayOutputStream
+import java.io.InputStreamReader
+import java.io.OutputStream
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+
+private const val CONNECT_TIMEOUT_MS = 15_000
+private const val CHANNEL_TIMEOUT_MS = 10_000
+private const val EXEC_OUTPUT_LIMIT = 1 shl 20
+
+// SSH_MSG_CHANNEL_OPEN_FAILURE reason codes (RFC 4254 §5.1).
+private const val OPEN_ADMINISTRATIVELY_PROHIBITED = 1
+private const val OPEN_CONNECT_FAILED = 2
+
+class SshError(code: String, message: String, cause: Throwable? = null) :
+  CodedException(code, message, cause)
+
+private class StreamChannel(val channel: ChannelDirectStreamLocal, val out: OutputStream)
+
+class HerdrSshModule : Module() {
+  private val io = Executors.newCachedThreadPool()
+  private val sessions = ConcurrentHashMap<String, Session>()
+  private val channels = ConcurrentHashMap<String, StreamChannel>()
+
+  override fun definition() = ModuleDefinition {
+    Name("HerdrSsh")
+
+    Events("onChannelData", "onChannelClose")
+
+    // Completes key exchange without any credentials configured and returns the server's
+    // host key. Authentication is never attempted.
+    AsyncFunction("probeHostKey") { host: String, port: Int, promise: Promise ->
+      run(promise) {
+        val repo = PinnedHostKeyRepository(null)
+        val session = newSession(host, port, "probe", repo)
+        try {
+          session.connect(CONNECT_TIMEOUT_MS)
+          session.disconnect()
+          throw SshError("ERR_PROBE", "server accepted the probe without host key verification")
+        } catch (e: JSchUnknownHostKeyException) {
+          val key = repo.captured ?: throw SshError("ERR_PROBE", "no host key received", e)
+          hostKeyInfo(key)
+        } catch (e: JSchException) {
+          throw mapConnectError(e)
+        } finally {
+          session.disconnect()
+        }
+      }
+    }
+
+    // Connects only if the server presents exactly the pinned key; the password is used
+    // after the key check passes.
+    AsyncFunction("connect") { host: String, port: Int, username: String, password: String, pinnedKey: String, promise: Promise ->
+      run(promise) {
+        val pinned = decodeKey(pinnedKey)
+        val repo = PinnedHostKeyRepository(pinned)
+        val session = newSession(host, port, username, repo)
+        session.setConfig("PreferredAuthentications", "password,keyboard-interactive")
+        session.userInfo = PasswordUserInfo(password)
+        session.setPassword(password)
+        try {
+          session.connect(CONNECT_TIMEOUT_MS)
+        } catch (e: JSchException) {
+          session.disconnect()
+          throw mapConnectError(e, repo)
+        }
+        val id = UUID.randomUUID().toString()
+        sessions[id] = session
+        id
+      }
+    }
+
+    AsyncFunction("exec") { sessionId: String, command: String, promise: Promise ->
+      run(promise) {
+        val session = requireSession(sessionId)
+        val channel = session.openChannel("exec") as ChannelExec
+        channel.setCommand(command)
+        val stdout = channel.inputStream
+        val stderr = channel.errStream
+        channel.connect(CHANNEL_TIMEOUT_MS)
+        // Drain stderr concurrently so a chatty command can't stall stdout on window space.
+        val errFuture = io.submit<String> { readLimited(stderr) }
+        val out = readLimited(stdout)
+        val err = errFuture.get()
+        while (!channel.isClosed) Thread.sleep(20)
+        val status = channel.exitStatus
+        channel.disconnect()
+        mapOf("stdout" to out, "stderr" to err, "exitCode" to status)
+      }
+    }
+
+    AsyncFunction("openSocket") { sessionId: String, socketPath: String, promise: Promise ->
+      run(promise) {
+        val session = requireSession(sessionId)
+        val channel = session.openChannel("direct-streamlocal@openssh.com") as ChannelDirectStreamLocal
+        channel.socketPath = socketPath
+        val input = channel.inputStream
+        try {
+          channel.connect(CHANNEL_TIMEOUT_MS)
+        } catch (e: JSchException) {
+          throw when (channel.exitStatus) {
+            OPEN_ADMINISTRATIVELY_PROHIBITED -> SshError(
+              "ERR_FORWARDING_PROHIBITED",
+              "sshd refused Unix-socket forwarding (AllowStreamLocalForwarding)", e)
+            OPEN_CONNECT_FAILED -> SshError(
+              "ERR_SOCKET_UNAVAILABLE", "nothing is listening on $socketPath", e)
+            else -> SshError("ERR_CHANNEL", e.message ?: "channel open failed", e)
+          }
+        }
+        val id = UUID.randomUUID().toString()
+        channels[id] = StreamChannel(channel, channel.outputStream)
+        io.execute {
+          var reason = "eof"
+          try {
+            val reader = InputStreamReader(input, Charsets.UTF_8)
+            val buf = CharArray(8192)
+            while (true) {
+              val n = reader.read(buf)
+              if (n < 0) break
+              sendEvent("onChannelData", mapOf("channelId" to id, "data" to String(buf, 0, n)))
+            }
+          } catch (e: Exception) {
+            reason = e.message ?: "read error"
+          } finally {
+            channels.remove(id)
+            channel.disconnect()
+            sendEvent("onChannelClose", mapOf("channelId" to id, "reason" to reason))
+          }
+        }
+        id
+      }
+    }
+
+    AsyncFunction("write") { channelId: String, data: String, promise: Promise ->
+      run(promise) {
+        val ch = channels[channelId] ?: throw SshError("ERR_NO_CHANNEL", "channel is closed")
+        synchronized(ch) {
+          ch.out.write(data.toByteArray(Charsets.UTF_8))
+          ch.out.flush()
+        }
+        null
+      }
+    }
+
+    Function("closeChannel") { channelId: String ->
+      channels.remove(channelId)?.channel?.disconnect()
+    }
+
+    Function("disconnect") { sessionId: String ->
+      sessions.remove(sessionId)?.disconnect()
+    }
+
+    OnDestroy {
+      channels.values.forEach { it.channel.disconnect() }
+      sessions.values.forEach { it.disconnect() }
+      io.shutdownNow()
+    }
+  }
+
+  private fun run(promise: Promise, block: () -> Any?) {
+    io.execute {
+      try {
+        promise.resolve(block())
+      } catch (e: CodedException) {
+        promise.reject(e)
+      } catch (e: Exception) {
+        promise.reject(SshError("ERR_SSH", e.message ?: e.javaClass.simpleName, e))
+      }
+    }
+  }
+
+  private fun newSession(host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session {
+    val jsch = JSch()
+    jsch.hostKeyRepository = repo
+    val session = jsch.getSession(user, host, port)
+    session.setConfig("StrictHostKeyChecking", "yes")
+    session.setConfig("HashKnownHosts", "no")
+    return session
+  }
+
+  private fun requireSession(id: String): Session {
+    val s = sessions[id] ?: throw SshError("ERR_NO_SESSION", "not connected")
+    if (!s.isConnected) {
+      sessions.remove(id)
+      throw SshError("ERR_NO_SESSION", "connection lost")
+    }
+    return s
+  }
+
+  private fun mapConnectError(e: JSchException, repo: PinnedHostKeyRepository? = null): CodedException {
+    if (e is JSchChangedHostKeyException) {
+      val got = repo?.captured?.let { hostKeyInfo(it)["fingerprint"] } ?: "unknown"
+      return SshError("ERR_HOSTKEY_MISMATCH", "host key does not match the pinned key (server sent $got)", e)
+    }
+    if (e is JSchUnknownHostKeyException) {
+      return SshError("ERR_HOSTKEY_MISMATCH", "host key not pinned", e)
+    }
+    val msg = e.message ?: ""
+    return when {
+      msg.startsWith("Auth fail") || msg.startsWith("Auth cancel") ->
+        SshError("ERR_AUTH", "authentication failed", e)
+      msg.contains("timeout", ignoreCase = true) -> SshError("ERR_TIMEOUT", "connection timed out", e)
+      else -> SshError("ERR_CONNECT", msg.ifEmpty { "connection failed" }, e)
+    }
+  }
+
+  private fun readLimited(stream: java.io.InputStream): String {
+    val out = ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (true) {
+      val n = stream.read(buf)
+      if (n < 0) break
+      if (out.size() + n > EXEC_OUTPUT_LIMIT) throw SshError("ERR_EXEC", "command output too large")
+      out.write(buf, 0, n)
+    }
+    return out.toString("UTF-8")
+  }
+
+  private fun decodeKey(b64: String): ByteArray =
+    try {
+      Base64.decode(b64, Base64.NO_WRAP).also { require(it.isNotEmpty()) }
+    } catch (e: IllegalArgumentException) {
+      throw SshError("ERR_ARGS", "invalid pinned key", e)
+    }
+
+  private fun hostKeyInfo(key: ByteArray): Map<String, String> = mapOf(
+    "algorithm" to HostKeys.algorithm(key),
+    "key" to Base64.encodeToString(key, Base64.NO_WRAP),
+    "fingerprint" to HostKeys.fingerprintSha256(key),
+  )
+}

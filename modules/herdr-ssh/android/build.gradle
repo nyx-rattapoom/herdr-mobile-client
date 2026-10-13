@@ -1,0 +1,31 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.herdrssh'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.herdrssh"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // SSH with direct-streamlocal@openssh.com support (see docs/SPIKE.md).
+  implementation 'com.github.mwiede:jsch:2.28.8'
+  // JSch uses its Bouncy Castle implementations for Ed25519/X25519/ChaCha20 on Android.
+  implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
+  testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(Test).configureEach {
+  // Opt-in integration test against test/server (see its README).
+  environment 'HERDR_TEST_SSH', System.getenv('HERDR_TEST_SSH') ?: ''
+}
