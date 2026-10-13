@@ -116,23 +116,30 @@ function need(v: string | undefined): string {
 }
 const paneOf = (t: Target) => need(t.kind === 'pane' ? t.node.pane_id : undefined);
 
-/** Special keys offered in the pane input bar, as Herdr key-combo strings. */
-export const SPECIAL_KEYS: { key: string; label: string }[] = [
+/**
+ * Special keys offered in the pane key bar, as Herdr key-combo strings. `key` identifies the entry;
+ * `keys` is sent instead when it is a sequence (Esc Esc). Agent shortcuts come first.
+ */
+export const SPECIAL_KEYS: { key: string; label: string; keys?: string[] }[] = [
   { key: 'esc', label: 'Esc' },
-  { key: 'ctrl+c', label: '^C' },
-  { key: 'enter', label: '⏎' },
+  { key: 'esc esc', label: 'Esc Esc', keys: ['esc', 'esc'] },
+  { key: 'shift+tab', label: '⇧Tab' },
   { key: 'tab', label: 'Tab' },
   { key: 'up', label: '↑' },
   { key: 'down', label: '↓' },
   { key: 'left', label: '←' },
   { key: 'right', label: '→' },
+  { key: 'enter', label: '⏎' },
   { key: 'backspace', label: '⌫' },
-  { key: 'shift+tab', label: '⇧Tab' },
+  { key: 'ctrl+c', label: '^C' },
   { key: 'ctrl+d', label: '^D' },
   { key: 'ctrl+z', label: '^Z' },
   { key: 'ctrl+l', label: '^L' },
   { key: 'ctrl+r', label: '^R' },
 ];
+
+/** The keys a special-key entry sends. */
+export const keysOf = (k: { key: string; keys?: string[] }) => k.keys ?? [k.key];
 
 /**
  * Text input request. `submit` appends Enter in the same request so the line and the key can't
@@ -144,7 +151,10 @@ export function inputRequest(paneId: string, text: string, mode: 'type' | 'submi
   return { method: 'pane.send_text', params: { pane_id: paneId, text } };
 }
 
-export const keyRequest = (paneId: string, key: string) => ({ method: 'pane.send_keys', params: { pane_id: paneId, keys: [key] } });
+export const keyRequest = (paneId: string, key: string | string[]) => ({
+  method: 'pane.send_keys',
+  params: { pane_id: paneId, keys: Array.isArray(key) ? key : [key] },
+});
 
 /** User-facing text for Herdr action errors. */
 export function describeActionError(e: unknown): string {

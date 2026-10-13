@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -11,9 +12,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SPECIAL_KEYS, describeActionError, inputRequest, keyRequest } from '../live/actions';
+import { SPECIAL_KEYS, describeActionError, inputRequest, keyRequest, keysOf } from '../live/actions';
 import type { Line } from '../live/ansi';
 import { getDraft, setDraft } from '../live/drafts';
+import { appendedChar, cleanPaste, modifiedChar, modifiedKey, type Modifier } from '../live/keys';
 import type { LiveSession } from '../live/LiveSession';
 import { QuickAnswers } from './QuickAnswers';
 import { colors, styles } from './ui';
@@ -66,13 +68,49 @@ export function Composer({
   const [expanded, setExpanded] = useState(false);
   // For sudo/password prompts: hide what is typed, keep it out of suggestions and out of drafts.
   const [hidden, setHidden] = useState(false);
+  /** One-shot Ctrl/Alt: applies to the next key or typed character, then resets. */
+  const [armed, setArmed] = useState<Modifier | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];
   // Landscape phones: keep the input short so the pane stays visible.
   const short = useWindowDimensions().height < 500;
 
   const setText = (t: string) => {
+    if (armed) {
+      setArmed(null);
+      const ch = appendedChar(text, t);
+      const key = ch ? modifiedChar(armed, ch) : null;
+      if (key) {
+        // The character goes to the pane as a key combination instead of into the input.
+        void send(keyRequest(paneId, key), false);
+        return;
+      }
+    }
     setTextState(t);
     setDraft(draftKey, hidden ? '' : t);
+  };
+
+  const pressKey = (k: (typeof SPECIAL_KEYS)[number]) => {
+    const keys = keysOf(k);
+    const mod = armed;
+    setArmed(null);
+    void send(keyRequest(paneId, mod && keys.length === 1 ? modifiedKey(mod, keys[0]) : keys), false);
+  };
+
+  const paste = async () => {
+    setNote(null);
+    const { text: clean, removed, truncated } = cleanPaste(await Clipboard.getStringAsync());
+    if (!clean) {
+      setNote('The clipboard has no text to paste.');
+      return;
+    }
+    if (await send({ method: 'pane.send_text', params: { pane_id: paneId, text: clean } }, false)) {
+      const notes = [
+        removed ? `removed ${removed} control character${removed === 1 ? '' : 's'}` : '',
+        truncated ? `cut to the first ${Math.round(clean.length / 1024)} KB` : '',
+      ].filter(Boolean);
+      setNote(`Pasted ${clean.length} characters${notes.length ? ` (${notes.join(', ')})` : ''}.`);
+    }
   };
 
   const send = async (req: { method: string; params: Record<string, unknown> }, clear: boolean) => {
@@ -127,6 +165,10 @@ export function Composer({
         <Text testID="input-error" style={[styles.muted, { color: colors.danger, marginBottom: 6 }]}>
           {error}
         </Text>
+      ) : note ? (
+        <Text testID="input-note" style={[styles.muted, { marginBottom: 6 }]}>
+          {note}
+        </Text>
       ) : mode === 'prompt' && paneBlank ? (
         // Herdr can report an agent as idle before its UI is drawn; a prompt sent then is lost.
         <Text testID="input-not-ready" style={[styles.muted, { marginBottom: 6 }]}>
@@ -141,6 +183,28 @@ export function Composer({
           style={{ marginBottom: 8 }}
           testID="key-row"
         >
+          {(['ctrl', 'alt'] as const).map((m) => (
+            <Pressable
+              key={m}
+              testID={`mod-${m}`}
+              accessibilityLabel={`${m === 'ctrl' ? 'Ctrl' : 'Alt'} for the next key${armed === m ? ' (armed)' : ''}`}
+              onPress={() => setArmed((a) => (a === m ? null : m))}
+              style={[bar.key, armed === m ? { backgroundColor: colors.accent, borderColor: colors.accent } : null]}
+            >
+              <Text style={[bar.keyText, { color: armed === m ? '#fff' : colors.text }]}>
+                {m === 'ctrl' ? 'Ctrl' : 'Alt'}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            testID="key-paste"
+            accessibilityLabel="Paste clipboard into the pane"
+            disabled={busy}
+            onPress={() => void paste()}
+            style={({ pressed }) => [bar.key, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={bar.keyText}>Paste</Text>
+          </Pressable>
           <Pressable
             testID="input-hidden"
             accessibilityLabel={hidden ? 'Show typed text' : 'Hide typed text'}
@@ -157,7 +221,7 @@ export function Composer({
               key={k.key}
               testID={`key-${k.key}`}
               disabled={busy}
-              onPress={() => void send(keyRequest(paneId, k.key), false)}
+              onPress={() => pressKey(k)}
               style={({ pressed }) => [bar.key, { opacity: pressed ? 0.6 : 1 }]}
             >
               <Text style={bar.keyText}>{k.label}</Text>

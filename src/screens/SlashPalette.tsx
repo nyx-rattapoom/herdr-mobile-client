@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, Modal, PanResponder, Pressable, Text, View } from 'react-native';
 
-import { SPECIAL_KEYS, describeActionError, keyRequest } from '../live/actions';
+import { SPECIAL_KEYS, describeActionError, keyRequest, keysOf } from '../live/actions';
 import type { LiveSession } from '../live/LiveSession';
 import { SlashMenu, type SlashCommand } from '../live/slash';
 import { colors, sheet, styles } from './ui';
@@ -273,7 +273,7 @@ function KeysSheet({
                 testID={`sheet-key-${k.key}`}
                 onPress={() =>
                   void live
-                    .query(keyRequest(paneId, k.key).method, keyRequest(paneId, k.key).params)
+                    .query(keyRequest(paneId, keysOf(k)).method, keyRequest(paneId, keysOf(k)).params)
                     .then(onSent)
                     .catch((e) => setError(describeActionError(e)))
                 }
