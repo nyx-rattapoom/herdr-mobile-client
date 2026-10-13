@@ -1,6 +1,6 @@
 import { FlatList, Pressable, Text, View } from 'react-native';
 
-import type { ServerProfile } from '../store/servers';
+import { authOf, type ServerProfile } from '../store/servers';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
@@ -9,12 +9,20 @@ type Props = {
   onAdd: () => void;
   onOpen: (s: ServerProfile) => void;
   onManage: (s: ServerProfile) => void;
+  onSettings: () => void;
 };
 
-export function ServersScreen({ servers, error, onAdd, onOpen, onManage }: Props) {
+export function ServersScreen({ servers, error, onAdd, onOpen, onManage, onSettings }: Props) {
   return (
     <View style={styles.screen}>
-      <Header title="Servers" />
+      <Header
+        title="Servers"
+        right={
+          <Pressable testID="open-settings" onPress={onSettings} hitSlop={12}>
+            <Text style={[styles.text, { color: colors.accent }]}>Settings</Text>
+          </Pressable>
+        }
+      />
       <View style={styles.body}>
         {error ? <ErrorBox message={error} /> : null}
         <FlatList
@@ -31,14 +39,14 @@ export function ServersScreen({ servers, error, onAdd, onOpen, onManage }: Props
             >
               <Text style={styles.text}>{item.label}</Text>
               <Text style={styles.muted}>
-                {item.username}@{item.host}:{item.port}
+                {item.username}@{item.host}:{item.port} · {authOf(item) === 'key' ? 'device key' : 'password'}
               </Text>
             </Pressable>
           )}
         />
         <Button testID="add-server" label="Add server" onPress={onAdd} />
         {servers.length > 0 ? (
-          <Text style={[styles.muted, { color: colors.muted }]}>Long-press a server to forget its host key or remove it.</Text>
+          <Text style={[styles.muted, { color: colors.muted }]}>Long-press a server to edit it, forget its host key or remove it.</Text>
         ) : null}
       </View>
     </View>

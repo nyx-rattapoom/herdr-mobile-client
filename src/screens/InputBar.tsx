@@ -10,6 +10,8 @@ type Props = {
   paneId: string;
   /** The pane runs a detected agent; enables the agent-prompt mode. */
   hasAgent: boolean;
+  /** A blocked agent wants an answer typed into the pane, not a new prompt. */
+  agentBlocked?: boolean;
   /** Re-read output right after input so the echo shows up quickly. */
   onSent: () => void;
 };
@@ -17,9 +19,9 @@ type Props = {
 type Mode = 'submit' | 'type' | 'prompt';
 const modeLabel: Record<Mode, string> = { submit: 'Line ⏎', type: 'Text only', prompt: 'Agent prompt' };
 
-export function InputBar({ live, paneId, hasAgent, onSent }: Props) {
+export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent }: Props) {
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<Mode>(hasAgent ? 'prompt' : 'submit');
+  const [mode, setMode] = useState<Mode>(hasAgent && !agentBlocked ? 'prompt' : 'submit');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];

@@ -5,6 +5,8 @@
   "dependencies": {
     "expo": "~57.0.28",
     "expo-build-properties": "~57.0.22",
+    "expo-clipboard": "~57.0.2",
+    "expo-local-authentication": "~57.0.3",
     "expo-notifications": "~57.0.22",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
