@@ -152,4 +152,20 @@ describe('LiveSession', () => {
     expect(reads()).toBe(before + 1);
     live.stop();
   });
+
+  it('uses a fresh connection per request, since Herdr closes each after one response', async () => {
+    const { server, live } = setup();
+    server.handlers['pane.read'] = () => ({ type: 'pane_read', read: { text: '' } });
+    void live.start();
+    await settle(200);
+    // Back-to-back reads: the second must not go out on the connection the first one's EOF is about to close.
+    const a = live.query('pane.read', { pane_id: 'w1:p1' });
+    await settle(1);
+    const b = live.query('pane.read', { pane_id: 'w1:p1' });
+    await settle(50);
+    await expect(a).resolves.toEqual({ type: 'pane_read', read: { text: '' } });
+    await expect(b).resolves.toEqual({ type: 'pane_read', read: { text: '' } });
+    for (const c of server.connections) expect(c.requests.filter((r) => r.method !== 'events.subscribe').length).toBeLessThanOrEqual(1);
+    live.stop();
+  });
 });

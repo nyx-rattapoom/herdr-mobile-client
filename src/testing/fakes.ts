@@ -58,6 +58,8 @@ export class FakeHerdr {
   connections: FakeTransport[] = [];
   handlers: Record<string, Handler> = {};
   failOpen: { code: string; message: string } | null = null;
+  /** Like Herdr: answer one request, then close the connection (subscriptions stay open). */
+  oneRequestPerConnection = true;
 
   constructor(private readonly makeClient: (t: FakeTransport) => import('../protocol/client').HerdrClient) {}
 
@@ -65,10 +67,14 @@ export class FakeHerdr {
     if (this.failOpen) throw Object.assign(new Error(this.failOpen.message), this.failOpen);
     const t = new FakeTransport();
     const origWrite = t.write.bind(t);
+    let answered = false;
     t.write = async (d: string) => {
       await origWrite(d);
       for (const line of d.split('\n').filter(Boolean)) {
         const { id, method, params } = JSON.parse(line);
+        // Herdr reads only the first line of a connection; later ones are never answered.
+        if (this.oneRequestPerConnection && answered) continue;
+        answered = true;
         setTimeout(() => {
           const h = this.handlers[method];
           try {
@@ -77,6 +83,8 @@ export class FakeHerdr {
           } catch (e) {
             t.push(JSON.stringify({ id, error: e }) + '\n');
           }
+          // The EOF arrives a moment after the response, as it does over SSH.
+          if (this.oneRequestPerConnection && method !== 'events.subscribe') setTimeout(() => t.serverClose('eof'), 5);
         }, 0);
       }
     };

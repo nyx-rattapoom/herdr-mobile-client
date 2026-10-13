@@ -25,6 +25,8 @@ export class PaneReader {
   private running = false;
   private inFlight = false;
   private last: PaneOutput | null = null;
+  /** The previous read failed; the next success is re-emitted even if unchanged, clearing the error. */
+  private failed = false;
   private lines = DEFAULT_LINES;
 
   constructor(
@@ -81,11 +83,13 @@ export class PaneReader {
       const raw = typeof res?.read?.text === 'string' ? res.read.text : '';
       const { text, capped } = capText(raw);
       const out: PaneOutput = { text, truncated: capped || res?.read?.truncated === true, lines };
-      if (this.running && (!this.last || out.text !== this.last.text || out.lines !== this.last.lines)) {
+      if (this.running && (!this.last || this.failed || out.text !== this.last.text || out.lines !== this.last.lines)) {
         this.last = out;
+        this.failed = false;
         this.onOutput(out);
       }
     } catch (e) {
+      this.failed = true;
       if (this.running) this.onError(e);
     } finally {
       this.inFlight = false;

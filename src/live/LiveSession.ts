@@ -54,7 +54,6 @@ export type LiveOptions = {
 export class LiveSession {
   private state: LiveState = { status: 'connecting', tree: [], agents: new Map() };
   private listeners = new Set<(s: LiveState) => void>();
-  private req: HerdrClient | null = null;
   private sub: HerdrClient | null = null;
   private subscribedPanes = '';
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,21 +96,19 @@ export class LiveSession {
     this.stopped = true;
     this.clearTimers();
     this.sub?.close();
-    this.req?.close();
-    this.sub = this.req = null;
+    this.sub = null;
   }
 
-  /** Sends a request on the shared request connection, reopening it if it was closed. */
+  /** Sends a request, then refreshes the tree. */
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    const c = await this.requestClient();
-    const result = await c.request<T>(method, params);
+    const result = await this.query<T>(method, params);
     this.scheduleRefresh();
     return result;
   }
 
   /** Read-only requests that should not trigger a tree refresh (e.g. pane.read polling). */
   async query<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    return (await this.requestClient()).request<T>(method, params);
+    return this.withConnection((c) => c.request<T>(method, params));
   }
 
   /** Forces a reconnect (e.g. after the user taps Retry). */
@@ -122,9 +119,17 @@ export class LiveSession {
     void this.connect();
   }
 
-  private async requestClient(): Promise<HerdrClient> {
-    if (!this.req || this.req.closed) this.req = await this.open();
-    return this.req;
+  /**
+   * Herdr answers one request per connection and then closes it (only subscriptions and waits
+   * stay open), so every request gets its own connection. Reusing one races the server's EOF.
+   */
+  private async withConnection<T>(fn: (c: HerdrClient) => Promise<T>): Promise<T> {
+    const c = await this.open();
+    try {
+      return await fn(c);
+    } finally {
+      c.close();
+    }
   }
 
   private async connect(): Promise<void> {
@@ -204,7 +209,7 @@ export class LiveSession {
     this.refreshing = (async () => {
       do {
         this.refreshAgain = false;
-        const snapshot = await fetchSnapshot(await this.requestClient());
+        const snapshot = await this.withConnection(fetchSnapshot);
         if (this.stopped) return;
         const panes = this.paneIds(snapshot);
         this.update({ status: 'live', error: undefined, snapshot, tree: buildTree(snapshot) });

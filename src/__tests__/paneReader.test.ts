@@ -34,6 +34,29 @@ describe('PaneReader', () => {
     r.stop();
   });
 
+  it('clears a failed read on the next success even when the text is unchanged', async () => {
+    let fail = false;
+    const outputs: string[] = [];
+    const errors: unknown[] = [];
+    const query = jest.fn(async () => {
+      if (fail) throw new Error('connection closed: eof');
+      return { read: { text: '' } } as never;
+    });
+    const r = new PaneReader(query, 'w1:p1', (o) => outputs.push(o.text), (e) => errors.push(e), 1000);
+    r.start();
+    await tick();
+    fail = true;
+    jest.advanceTimersByTime(1000);
+    await tick();
+    expect(errors).toHaveLength(1);
+    fail = false;
+    jest.advanceTimersByTime(1000);
+    await tick();
+    // The empty pane is re-emitted so the view drops its error banner.
+    expect(outputs).toEqual(['', '']);
+    r.stop();
+  });
+
   it('grows the window up to the cap', async () => {
     const { r, calls } = setup(['a']);
     r.start();
