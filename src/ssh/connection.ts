@@ -2,6 +2,7 @@ import HerdrSsh from '../../modules/herdr-ssh';
 import { HerdrClient } from '../protocol/client';
 import {
   discoveryCommand,
+  versionCommand,
   explainInstall,
   explainStart,
   installCommand,
@@ -12,6 +13,7 @@ import {
   type InstallOutcome,
 } from '../protocol/sessions';
 import type { Transport } from '../protocol/transport';
+import { ConnectStepError, parseHerdrVersion } from '../live/connectSteps';
 import type { HostKeyPin } from './pinning';
 
 const FORWARDING_PROHIBITED_TEXT =
@@ -64,6 +66,12 @@ export class ServerConnection {
   static async open(p: ConnectParams, pin: HostKeyPin): Promise<ServerConnection> {
     const id = await HerdrSsh.connect(p.host, p.port, p.username, { password: p.password, privateKey: p.privateKey }, pin.key);
     return new ServerConnection(id);
+  }
+
+  /** The installed herdr's version (e.g. `0.9.3`), or null when herdr isn't found. */
+  async herdrVersion(herdrPath?: string): Promise<string | null> {
+    const res = await HerdrSsh.exec(this.sessionId, versionCommand(herdrPath), 30_000);
+    return parseHerdrVersion(res.stdout);
   }
 
   async discoverSessions(herdrPath?: string): Promise<DiscoveryResult> {
@@ -124,6 +132,7 @@ export const probeHostKey = (host: string, port: number) => HerdrSsh.probeHostKe
 
 /** User-facing text for native error codes. */
 export function describeSshError(e: unknown): string {
+  if (e instanceof ConnectStepError) return e.message;
   const code = (e as { code?: string })?.code;
   const msg = (e as { message?: string })?.message ?? String(e);
   // expo-secure-store rejections from the biometric vault.

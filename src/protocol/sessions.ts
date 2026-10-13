@@ -69,6 +69,11 @@ export function discoveryCommand(herdrPath?: string): string {
   );
 }
 
+/** Prints the herdr binary's `--version` line, or nothing when herdr isn't found. */
+export function versionCommand(herdrPath?: string): string {
+  return wrap([findHerdrScript(herdrPath), '[ -n "$H" ] && "$H" --version 2>/dev/null | head -n 1', 'true'].join('; '));
+}
+
 /** Kept for callers that do not configure a herdr path. */
 export const DISCOVERY_COMMAND = discoveryCommand();
 

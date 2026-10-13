@@ -98,6 +98,22 @@ export class LiveSession {
     return () => this.listeners.delete(listener);
   }
 
+  /** Resolves with the state once it leaves `connecting`, or with the current state after `timeoutMs`. */
+  whenSettled(timeoutMs: number): Promise<LiveState> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        unsub();
+        resolve(this.state);
+      };
+      const timer = setTimeout(done, timeoutMs);
+      const unsub = this.subscribe((s) => {
+        if (s.status !== 'connecting') done();
+      });
+      if (this.state.status !== 'connecting') done();
+    });
+  }
+
   async start(): Promise<void> {
     await this.connect();
   }

@@ -7,6 +7,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { actionRequest, actionsFor, confirmText, describeActionError, targetName, type ActionId, type Target } from './src/live/actions';
 import type { AgentAlert } from './src/live/agents';
 import { AlertDeduper, formatAlert } from './src/live/alerts';
+import { CONNECT_STEPS, ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
 import {
   onNotificationTap,
@@ -17,6 +18,7 @@ import {
   type AlertTarget,
 } from './src/notify';
 import type { PaneNode } from './src/protocol/snapshot';
+import { ConnectScreen } from './src/screens/ConnectScreen';
 import { HostKeyScreen } from './src/screens/HostKeyScreen';
 import { ActionSheet, PromptDialog } from './src/screens/dialogs';
 import { InputBar } from './src/screens/InputBar';
@@ -27,6 +29,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, colors } from './src/screens/ui';
+import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import { endpointInUse, type ServerProfile } from './src/store/servers';
@@ -38,6 +41,7 @@ type Route =
   | { name: 'edit'; server: ServerProfile; hasPassword: boolean }
   | { name: 'settings' }
   | { name: 'busy'; label: string }
+  | { name: 'connecting'; progress: ConnectProgress }
   | {
       name: 'hostkey';
       server: ServerProfile;
@@ -46,6 +50,12 @@ type Route =
     }
   | { name: 'sessions'; server: ServerProfile; entries: SessionEntry[]; herdrFound: boolean; setup?: SetupState }
   | { name: 'pane'; parent: Extract<Route, { name: 'sessions' }>; live: LiveSession; pane: PaneNode };
+
+/** Thrown when the user cancelled the connection attempt that is still running. */
+class Cancelled extends Error {}
+
+/** How long step 6 waits for the first snapshot. */
+const SNAPSHOT_TIMEOUT_MS = 20_000;
 
 export default function App() {
   const account = useAccount();
@@ -62,6 +72,9 @@ export default function App() {
   const routeRef = useRef<Route>(route);
   const deduper = useRef(new AlertDeduper());
   const pendingTap = useRef<AlertTarget | null>(null);
+  /** Bumped by every new connection attempt and by cancel; stale attempts stop at their next step. */
+  const attempt = useRef(0);
+  const progress = useRef<ConnectProgress | null>(null);
   useEffect(() => {
     routeRef.current = route;
   }, [route]);
@@ -77,6 +90,7 @@ export default function App() {
   }, []);
 
   const home = useCallback(() => {
+    attempt.current++;
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     conn.current?.close();
@@ -117,8 +131,8 @@ export default function App() {
     return () => sub.remove();
   }, [route, home]);
 
-  const loadSessions = useCallback(async (server: ServerProfile, c: ServerConnection) => {
-    const discovery = await c.discoverSessions(server.herdrPath);
+  /** Starts a live view of every running session and returns the sessions route (not yet shown). */
+  const startSessions = useCallback((server: ServerProfile, c: ServerConnection, discovery: DiscoveryResult) => {
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     // Without a working herdr there is nothing to subscribe to: offer install or start instead.
@@ -139,7 +153,12 @@ export default function App() {
       void live.start();
       return { session, live };
     });
-    const route: Route = { name: 'sessions', server, entries, herdrFound: discovery.herdrFound, setup };
+    return { name: 'sessions', server, entries, herdrFound: discovery.herdrFound, setup } satisfies Route;
+  }, [handleAlert]);
+
+  /** Shows a sessions route and handles a notification tap that arrived before it was connected. */
+  const showSessions = useCallback((route: Extract<Route, { name: 'sessions' }>) => {
+    const { server, entries } = route;
     setRoute(route);
     routeRef.current = route;
     startBackgroundMonitoring(`Watching agents on ${server.label}`);
@@ -154,18 +173,61 @@ export default function App() {
         });
       }
     }
-  }, [handleAlert, openTarget]);
+  }, [openTarget]);
 
+  const loadSessions = useCallback(
+    async (server: ServerProfile, c: ServerConnection) => showSessions(startSessions(server, c, await c.discoverSessions(server.herdrPath))),
+    [showSessions, startSessions],
+  );
+
+  /** Runs one connect step: shows it, and names it in the error if it fails. */
+  const step = useCallback(async <T,>(id: number, n: number, fn: () => Promise<T>, note?: (r: T) => string | undefined): Promise<T> => {
+    if (id !== attempt.current || !progress.current) throw new Cancelled();
+    progress.current = { ...progress.current, step: n };
+    setRoute({ name: 'connecting', progress: progress.current });
+    let result: T;
+    try {
+      result = await fn();
+    } catch (e) {
+      if (e instanceof Cancelled || id !== attempt.current) throw new Cancelled();
+      throw new ConnectStepError(n, e, describeSshError(e));
+    }
+    if (id !== attempt.current) throw new Cancelled();
+    const text = note?.(result);
+    if (text) progress.current = { ...progress.current, notes: { ...progress.current.notes, [n]: text } };
+    return result;
+  }, []);
+
+  /** Steps 3–6 of CONNECT_STEPS, after the host key is known to match. */
   const connectPinned = useCallback(
-    async (server: ServerProfile, pin: HostKeyPin) => {
-      setRoute({ name: 'busy', label: 'Authenticating…' });
-      const creds = await credentialsFor(server);
-      const c = await ServerConnection.open({ ...server, ...creds }, pin);
+    async (server: ServerProfile, pin: HostKeyPin, id: number) => {
+      const c = await step(id, 2, async () => {
+        const creds = await credentialsFor(server);
+        return ServerConnection.open({ ...server, ...creds }, pin);
+      });
+      if (id !== attempt.current) {
+        c.close();
+        throw new Cancelled();
+      }
       conn.current = c;
-      setRoute({ name: 'busy', label: 'Loading Herdr sessions…' });
-      await loadSessions(server, c);
+      await step(id, 3, () => c.herdrVersion(server.herdrPath), (v) => (v ? `herdr ${v}` : 'not installed'));
+      const route = await step(
+        id,
+        4,
+        async () => startSessions(server, c, await c.discoverSessions(server.herdrPath)),
+        (r) => `${r.entries.length} session${r.entries.length === 1 ? '' : 's'}`,
+      );
+      const first = route.entries.find((e) => e.live)?.live;
+      if (first) {
+        await step(id, 5, async () => {
+          const st = await first.whenSettled(SNAPSHOT_TIMEOUT_MS);
+          if (st.status === 'connecting') throw new Error(`no snapshot after ${SNAPSHOT_TIMEOUT_MS / 1000} s`);
+          if (st.status === 'offline' || st.status === 'reconnecting') throw new Error(st.error ?? st.status);
+        });
+      }
+      showSessions(route);
     },
-    [credentialsFor, loadSessions],
+    [credentialsFor, startSessions, showSessions, step],
   );
 
   /** Runs the official installer (if needed) and starts a server, then reloads the session list. */
@@ -192,6 +254,9 @@ export default function App() {
   );
 
   const fail = useCallback((e: unknown) => {
+    if (e instanceof Cancelled) return;
+    lives.current.forEach((l) => l.stop());
+    lives.current = [];
     conn.current?.close();
     conn.current = null;
     setError(describeSshError(e));
@@ -201,17 +266,24 @@ export default function App() {
   const open = useCallback(
     async (server: ServerProfile) => {
       setError(null);
-      setRoute({ name: 'busy', label: `Checking host key of ${server.host}…` });
+      const id = ++attempt.current;
+      progress.current = { step: 0, target: `${server.username}@${server.host}:${server.port}`, startedAt: Date.now(), notes: {} };
       try {
-        const presented = await probeHostKey(server.host, server.port);
-        const decision = decidePin(await pins.get(server.host, server.port), presented);
-        if (decision.kind === 'match') return await connectPinned(server, decision.pin);
+        const presented = await step(id, 0, () => probeHostKey(server.host, server.port), (k) => k.algorithm);
+        // A mismatch is not an error here: the host key screen explains it.
+        const decision = await step(
+          id,
+          1,
+          async () => decidePin(await pins.get(server.host, server.port), presented),
+          (d) => (d.kind === 'match' ? 'pinned' : d.kind === 'unpinned' ? 'new key' : 'changed!'),
+        );
+        if (decision.kind === 'match') return await connectPinned(server, decision.pin, id);
         setRoute({ name: 'hostkey', server, decision, previous: await pins.previous(server.host, server.port) });
       } catch (e) {
         fail(e);
       }
     },
-    [pins, connectPinned, fail],
+    [pins, connectPinned, fail, step],
   );
 
   useEffect(
@@ -232,7 +304,7 @@ export default function App() {
       if (decision.kind !== 'unpinned') return;
       try {
         const pin = await pins.pin(server.host, server.port, decision.presented);
-        await connectPinned(server, pin);
+        await connectPinned(server, pin, attempt.current);
       } catch (e) {
         fail(e);
       }
@@ -386,6 +458,9 @@ export default function App() {
       break;
     case 'busy':
       screen = <Busy label={route.label} />;
+      break;
+    case 'connecting':
+      screen = <ConnectScreen progress={route.progress} onCancel={home} />;
       break;
     case 'hostkey':
       screen = (

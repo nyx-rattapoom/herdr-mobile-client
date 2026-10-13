@@ -247,4 +247,19 @@ describe('LiveSession', () => {
       live.stop();
     });
   });
+
+  it('whenSettled resolves once the first snapshot is in, or with the current state on timeout', async () => {
+    const { server, live } = setup();
+    const settled = live.whenSettled(5_000);
+    void live.start();
+    await settle(200);
+    await expect(settled).resolves.toMatchObject({ status: 'live' });
+    live.stop();
+
+    // Never started, so it stays connecting.
+    const stuck = new LiveSession(server.open);
+    const timedOut = stuck.whenSettled(1_000);
+    await settle(1_200);
+    await expect(timedOut).resolves.toMatchObject({ status: 'connecting' });
+  });
 });
