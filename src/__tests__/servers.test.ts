@@ -1,4 +1,4 @@
-import { ServerStore, validateServer } from '../store/servers';
+import { ServerStore, endpointInUse, validateServer } from '../store/servers';
 import { MemoryKv } from '../testing/fakes';
 
 const base = { host: '10.0.2.2', port: 2222, username: 'herdr', password: 'pw' };
@@ -49,5 +49,14 @@ describe('ServerStore', () => {
     await store.update('e1', { ...base, auth: 'key', password: '' }, { clearPassword: true });
     expect(await store.password('e1')).toBeNull();
     await expect(store.update('nope', base)).rejects.toThrow('not found');
+  });
+});
+
+describe('endpointInUse', () => {
+  it('matches host case-insensitively per port', () => {
+    const list = [{ host: 'Box.example', port: 22 }];
+    expect(endpointInUse(list, 'box.example', 22)).toBe(true);
+    expect(endpointInUse(list, 'box.example', 2222)).toBe(false);
+    expect(endpointInUse([], 'box.example', 22)).toBe(false);
   });
 });

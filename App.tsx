@@ -29,7 +29,7 @@ import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, colors } from './src/screens/ui';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
-import type { ServerProfile } from './src/store/servers';
+import { endpointInUse, type ServerProfile } from './src/store/servers';
 import { useAccount } from './src/useAccount';
 
 type Route =
@@ -258,7 +258,8 @@ export default function App() {
             style: 'destructive',
             onPress: async () => {
               await servers.remove(server.id);
-              await pins.purge(server.host, server.port);
+              // Pins belong to host:port; keep them while another profile still uses that endpoint.
+              if (!endpointInUse(await servers.list(), server.host, server.port)) await pins.purge(server.host, server.port);
               reload();
             },
           },

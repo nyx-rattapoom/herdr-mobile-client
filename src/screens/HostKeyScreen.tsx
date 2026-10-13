@@ -50,7 +50,8 @@ export function HostKeyScreen({ server, decision, previous, onTrust, onCancel }:
       <Header title="Verify host key" onBack={onCancel} />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.text}>
-          First connection to <Text style={{ fontWeight: '700' }}>{endpoint}</Text>. Check that this fingerprint
+          {previous ? 'Confirming the host key again for ' : 'First connection to '}
+          <Text style={{ fontWeight: '700' }}>{endpoint}</Text>. Check that this fingerprint
           matches the server before trusting it. Nothing has been sent to the server yet.
         </Text>
         <View style={styles.card}>

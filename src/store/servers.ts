@@ -1,5 +1,5 @@
 import { validateHerdrPath } from '../protocol/sessions';
-import type { KeyValueStore } from '../ssh/pinning';
+import { endpointId, type KeyValueStore } from '../ssh/pinning';
 
 export type AuthMethod = 'key' | 'password';
 
@@ -28,6 +28,11 @@ export type ServerInput = {
   password: string;
   herdrPath?: string;
 };
+
+/** Whether any profile still connects to host:port (host-key pins are per endpoint, not per profile). */
+export function endpointInUse(list: Pick<ServerProfile, 'host' | 'port'>[], host: string, port: number): boolean {
+  return list.some((o) => endpointId(o.host, o.port) === endpointId(host, port));
+}
 
 export const authOf = (s: Pick<ServerProfile, 'auth'>): AuthMethod => s.auth ?? 'password';
 
