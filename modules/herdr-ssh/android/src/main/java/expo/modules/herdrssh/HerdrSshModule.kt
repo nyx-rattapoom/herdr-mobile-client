@@ -250,7 +250,8 @@ class HerdrSshModule : Module() {
     }
     val msg = e.message ?: ""
     return when {
-      msg.startsWith("Auth fail") || msg.startsWith("Auth cancel") ->
+      msg.startsWith("Auth fail") || msg.startsWith("Auth cancel") ||
+        msg.contains("Too many authentication failures") ->
         SshError("ERR_AUTH", "authentication failed", e)
       msg.contains("timeout", ignoreCase = true) -> SshError("ERR_TIMEOUT", "connection timed out", e)
       else -> SshError("ERR_CONNECT", msg.ifEmpty { "connection failed" }, e)

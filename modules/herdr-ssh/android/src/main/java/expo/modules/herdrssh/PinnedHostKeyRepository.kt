@@ -50,11 +50,17 @@ object HostKeys {
   }
 }
 
-/** Answers JSch's password prompts (password and keyboard-interactive) with one secret. */
+/**
+ * Answers JSch's password prompts (password and keyboard-interactive) with one secret, once per
+ * method: a wrong password must not be retried until sshd's MaxAuthTries disconnects us.
+ */
 class PasswordUserInfo(private val password: String) : UserInfo, com.jcraft.jsch.UIKeyboardInteractive {
+  private var interactivePrompts = 0
+
   override fun getPassphrase(): String? = null
   override fun getPassword(): String = password
-  override fun promptPassword(message: String?): Boolean = true
+  // JSch sends session.setPassword first and only prompts to retry after a failure.
+  override fun promptPassword(message: String?): Boolean = false
   override fun promptPassphrase(message: String?): Boolean = false
   // Host key decisions are made by PinnedHostKeyRepository, never by prompts.
   override fun promptYesNo(message: String?): Boolean = false
@@ -64,7 +70,7 @@ class PasswordUserInfo(private val password: String) : UserInfo, com.jcraft.jsch
     destination: String?, name: String?, instruction: String?, prompt: Array<out String>?, echo: BooleanArray?,
   ): Array<String>? {
     val p = prompt ?: return null
-    if (p.size != 1 || echo?.getOrNull(0) == true) return null
+    if (p.size != 1 || echo?.getOrNull(0) == true || interactivePrompts++ > 0) return null
     return arrayOf(password)
   }
 }
