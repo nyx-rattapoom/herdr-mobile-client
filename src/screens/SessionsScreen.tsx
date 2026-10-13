@@ -166,10 +166,7 @@ export function SessionsScreen({ title, entries, herdrFound, onOpenPane, onActio
       <Header title={title} onBack={onBack} />
       <ScrollView contentContainerStyle={styles.body}>
         {banner}
-        {!herdrFound ? (
-          <Text style={styles.muted}>`herdr` was not found on the server; using the default socket location.</Text>
-        ) : null}
-        {entries.length === 0 ? <Text style={styles.muted}>No Herdr sessions found on this server.</Text> : null}
+        {herdrFound && entries.length === 0 ? <Text style={styles.muted}>No Herdr sessions found on this server.</Text> : null}
         {entries.map((e) => (
           <SessionCard key={e.session.name} entry={e} onOpenPane={onOpenPane} onAction={onAction} onReconnect={onReconnect} />
         ))}
