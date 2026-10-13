@@ -17,6 +17,8 @@ import type { Line } from '../live/ansi';
 import { getDraft, setDraft } from '../live/drafts';
 import { appendedChar, cleanPaste, modifiedChar, modifiedKey, type Modifier } from '../live/keys';
 import type { LiveSession } from '../live/LiveSession';
+import type { PromptQueues } from '../live/promptQueue';
+import { QueueList } from './QueueList';
 import { QuickAnswers } from './QuickAnswers';
 import { colors, styles } from './ui';
 
@@ -38,6 +40,9 @@ type Props = {
   agentName?: string;
   /** Called after a quick answer was sent. */
   onAnswered?: (label: string) => void;
+  /** The session's prompt queue: agent prompts wait here while the agent works. */
+  queue?: PromptQueues;
+  agentStatus?: string;
 };
 
 type Mode = 'submit' | 'type' | 'prompt';
@@ -59,6 +64,8 @@ export function Composer({
   screen,
   agentName,
   onAnswered,
+  queue,
+  agentStatus,
 }: Props) {
   const [text, setTextState] = useState(() => getDraft(draftKey));
   const [mode, setMode] = useState<Mode>(hasAgent && !agentBlocked ? 'prompt' : 'submit');
@@ -131,6 +138,20 @@ export function Composer({
 
   const submit = async () => {
     if (!text && mode !== 'submit') return;
+    // While the agent works or waits for an answer (or earlier prompts still wait), agent prompts
+    // join the queue. A blocked agent's queue stays paused, so this never answers its question.
+    const busyAgent = agentStatus === 'working' || agentStatus === 'blocked';
+    if (mode === 'prompt' && queue && (busyAgent || queue.items(paneId).length > 0)) {
+      try {
+        await queue.add(paneId, text);
+        setText('');
+        setNote('Queued: sends when the agent finishes.');
+        if (expanded) setExpanded(false);
+      } catch (e) {
+        setError(describeActionError(e));
+      }
+      return;
+    }
     if ((await send(inputRequest(paneId, text, mode), true)) && expanded) setExpanded(false);
   };
 
@@ -276,6 +297,7 @@ export function Composer({
           </Pressable>
         </View>
       </View>
+      {queue ? <QueueList queue={queue} paneId={paneId} onSent={onSent} /> : null}
       {expanded ? (
         <Modal animationType="slide" onRequestClose={() => setExpanded(false)}>
           {/* The modal window is edge-to-edge; keep its controls out from under the status bar. */}

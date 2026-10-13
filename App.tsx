@@ -10,6 +10,7 @@ import { AlertDeduper, formatAlert } from './src/live/alerts';
 import { draftKey } from './src/live/drafts';
 import { ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
+import { PromptQueues } from './src/live/promptQueue';
 import { resumeConnection } from './src/live/resume';
 import { AGENTS_URL, monitorText } from './src/live/summary';
 import {
@@ -42,6 +43,8 @@ import { plainKv, useAccount } from './src/useAccount';
 
 const viewedStore = new ViewedStore(plainKv);
 const audit = new AuditLog(plainKv);
+/** Each live session's prompt queue. */
+const queues = new WeakMap<LiveSession, PromptQueues>();
 
 /** Destructive actions recorded in the audit log, with how they read there. */
 const AUDITED: Partial<Record<ActionId, string>> = {
@@ -134,6 +137,7 @@ export default function App() {
 
   const home = useCallback(() => {
     attempt.current++;
+    lives.current.forEach((l) => queues.get(l)?.dispose());
     setResumeNote(null);
     lives.current.forEach((l) => l.stop());
     lives.current = [];
@@ -220,6 +224,21 @@ export default function App() {
           }),
       });
       lives.current.push(live);
+      const queue = new PromptQueues(plainKv, `${server.id}|${session.name}`, (paneId, text) =>
+        live.query('agent.prompt', { target: paneId, text }).then(() => undefined),
+      );
+      queues.set(live, queue);
+      void queue.load();
+      let paneSet = '';
+      live.subscribe((st) => {
+        queue.drive(st.status, st.agents);
+        // Forget queues of panes that were closed.
+        const ids = st.snapshot ? st.snapshot.panes.map((p) => p.pane_id).sort().join(',') : '';
+        if (ids && ids !== paneSet) {
+          paneSet = ids;
+          void queue.prune(new Set(ids.split(',')));
+        }
+      });
       void live.start();
       return { session, live };
     });
@@ -729,6 +748,8 @@ export default function App() {
               paneBlank={blank}
               screen={screen}
               agentName={agentOf(paneId)?.agent}
+              queue={queues.get(r.live)}
+              agentStatus={agentOf(paneId)?.status}
               onAnswered={(label) =>
                 void audit.record({ server: r.parent.server.label, target: `pane ${paneId}`, action: `quick answer: ${label}` })
               }
