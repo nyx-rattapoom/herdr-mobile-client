@@ -10,8 +10,15 @@ export function useLive(live: LiveSession): LiveState {
   );
 }
 
+/** Last output per pane, so a pane shown again (or after a reconnect) starts from its last screen. */
+const lastOutput = new WeakMap<LiveSession, Map<string, PaneOutput>>();
+
+export function cachedOutput(live: LiveSession, paneId: string): PaneOutput | null {
+  return lastOutput.get(live)?.get(paneId) ?? null;
+}
+
 export function usePaneOutput(live: LiveSession, paneId: string) {
-  const [output, setOutput] = useState<PaneOutput | null>(null);
+  const [output, setOutput] = useState<PaneOutput | null>(() => cachedOutput(live, paneId));
   const [error, setError] = useState<string | null>(null);
 
   const reader = useMemo(
@@ -20,6 +27,9 @@ export function usePaneOutput(live: LiveSession, paneId: string) {
         (m, p) => live.query(m, p),
         paneId,
         (o) => {
+          let m = lastOutput.get(live);
+          if (!m) lastOutput.set(live, (m = new Map()));
+          m.set(paneId, o);
           setOutput(o);
           setError(null);
         },

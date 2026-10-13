@@ -32,6 +32,8 @@ type Props = {
   onSelect: (s: Selection) => void;
   onBack: () => void;
   onReconnect?: () => void;
+  /** A connection notice, e.g. while reconnecting after a resume. */
+  notice?: string | null;
   /** Opens the action sheet for a long-pressed target. */
   onAction: (t: Target) => void;
   /** Runs one action directly (it still asks for a label or confirmation where needed). */
@@ -82,6 +84,11 @@ export function WorkspaceScreen(p: Props) {
         </Pressable>
         <AgentsButton live={p.live} onPress={() => setAgentsOpen(true)} />
       </View>
+      {p.notice ? (
+        <Text testID="notice" style={[styles.muted, { color: colors.warn, paddingHorizontal: 16, paddingBottom: 6 }]}>
+          {p.notice}
+        </Text>
+      ) : null}
       {st.status !== 'live' ? (
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <LiveBanner live={p.live} st={st} session={p.session} onReconnect={p.onReconnect} />

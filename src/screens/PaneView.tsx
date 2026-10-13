@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -18,6 +18,12 @@ import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
 import { ErrorBox, colors, styles } from './ui';
 
 const FONT_SIZE = 12;
+/** Fixed height of the list header, so every row's offset is known without measuring. */
+const HEADER_H = 36;
+
+type ScrollMemory = { y: number; follow: boolean };
+/** Where each pane was scrolled to, so switching back (or reconnecting) keeps the position. */
+const scrollMemory = new WeakMap<LiveSession, Map<string, ScrollMemory>>();
 const PAD = 8;
 
 type Props = {
@@ -48,11 +54,43 @@ export function PaneView({ live, paneId, footer, overlay }: Props) {
   // Rows keep the pane's own width; a pane wider than the phone scrolls sideways instead of wrapping.
   const contentWidth = Math.max(screenWidth, Math.ceil(cols * metrics.w) + PAD * 2);
   const list = useRef<FlatList<GridLine>>(null);
-  const [follow, setFollow] = useState(true);
+  const [saved] = useState(() => scrollMemory.get(live)?.get(paneId));
+  const [follow, setFollow] = useState(saved?.follow ?? true);
+  /** A saved position still to restore once the list has laid out. */
+  const restore = useRef(saved && !saved.follow ? saved.y : null);
+
+  const viewport = useRef(0);
+  useEffect(() => {
+    // Give up waiting for the list to grow; restore as far as it goes.
+    const t = setTimeout(() => {
+      if (restore.current === null) return;
+      list.current?.scrollToOffset({ offset: restore.current, animated: false });
+      restore.current = null;
+    }, 3000);
+    return () => clearTimeout(t);
+  }, []);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Until a saved position is restored, scroll events come from the list growing.
+    if (restore.current !== null) return;
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    setFollow(contentOffset.y + layoutMeasurement.height >= contentSize.height - 24);
+    const atEnd = contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
+    setFollow(atEnd);
+    let m = scrollMemory.get(live);
+    if (!m) scrollMemory.set(live, (m = new Map()));
+    m.set(paneId, { y: contentOffset.y, follow: atEnd });
+  };
+
+  const onContentSizeChange = (_w: number, h: number) => {
+    if (restore.current !== null) {
+      // The list renders in batches; restore once it is tall enough to scroll that far.
+      if (h >= restore.current + viewport.current) {
+        list.current?.scrollToOffset({ offset: restore.current, animated: false });
+        restore.current = null;
+      }
+    } else if (follow) {
+      list.current?.scrollToEnd({ animated: false });
+    }
   };
 
   return (
@@ -79,19 +117,24 @@ export function PaneView({ live, paneId, footer, overlay }: Props) {
             renderItem={({ item }) => <TermRow g={item} m={metrics} />}
             onScroll={onScroll}
             scrollEventThrottle={100}
-            onContentSizeChange={() => follow && list.current?.scrollToEnd({ animated: false })}
+            onContentSizeChange={onContentSizeChange}
+            onLayout={(e) => (viewport.current = e.nativeEvent.layout.height)}
             initialNumToRender={60}
             windowSize={15}
+            // Fixed row heights let the list jump straight to a saved offset.
+            getItemLayout={(_, index) => ({ length: metrics.h, offset: PAD + HEADER_H + index * metrics.h, index })}
             ListHeaderComponent={
-              output?.truncated ? (
-                <Pressable testID="load-more" onPress={() => reader?.loadMore()} style={{ paddingVertical: 8 }}>
-                  <Text style={[styles.muted, { color: colors.accent, textAlign: 'center' }]}>
-                    Load more scrollback (showing last {output.lines} lines)
-                  </Text>
-                </Pressable>
-              ) : output ? (
-                <Text style={[styles.muted, { textAlign: 'center', paddingVertical: 8 }]}>Start of scrollback</Text>
-              ) : null
+              <View style={{ height: HEADER_H, justifyContent: 'center' }}>
+                {output?.truncated ? (
+                  <Pressable testID="load-more" onPress={() => reader?.loadMore()}>
+                    <Text style={[styles.muted, { color: colors.accent, textAlign: 'center' }]}>
+                      Load more scrollback (showing last {output.lines} lines)
+                    </Text>
+                  </Pressable>
+                ) : output ? (
+                  <Text style={[styles.muted, { textAlign: 'center' }]}>Start of scrollback</Text>
+                ) : null}
+              </View>
             }
             ListEmptyComponent={<Text style={styles.muted}>{output ? '' : 'Loading…'}</Text>}
           />

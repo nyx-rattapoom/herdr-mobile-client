@@ -123,6 +123,16 @@ export class ServerConnection {
     return e;
   }
 
+  /** Whether the SSH session still runs commands; false after a dropped connection. */
+  async alive(timeoutMs = 5000): Promise<boolean> {
+    try {
+      await HerdrSsh.exec(this.sessionId, 'true', timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   close() {
     HerdrSsh.disconnect(this.sessionId);
   }

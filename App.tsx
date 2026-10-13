@@ -10,6 +10,7 @@ import { AlertDeduper, formatAlert } from './src/live/alerts';
 import { draftKey } from './src/live/drafts';
 import { ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
+import { resumeConnection } from './src/live/resume';
 import {
   onNotificationTap,
   postAgentNotification,
@@ -119,6 +120,7 @@ export default function App() {
 
   const home = useCallback(() => {
     attempt.current++;
+    setResumeNote(null);
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     conn.current?.close();
@@ -166,7 +168,14 @@ export default function App() {
   }, [route, home]);
 
   /** Starts a live view of every running session and returns the sessions route (not yet shown). */
-  const startSessions = useCallback((server: ServerProfile, c: ServerConnection, discovery: DiscoveryResult) => {
+  /** Opens a Herdr socket over whatever SSH connection is current, so a reconnect is picked up. */
+  const openSocket = useCallback((socketPath: string) => {
+    const c = conn.current;
+    if (!c) return Promise.reject(Object.assign(new Error('Not connected to the server.'), { code: 'ERR_NO_SESSION' }));
+    return c.openHerdr(socketPath);
+  }, []);
+
+  const startSessions = useCallback((server: ServerProfile, discovery: DiscoveryResult) => {
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     // Without a working herdr there is nothing to subscribe to: offer install or start instead.
@@ -178,7 +187,7 @@ export default function App() {
         : undefined;
     const entries: SessionEntry[] = (discovery.herdrFound ? discovery.sessions : []).map((session) => {
       if (!session.running) return { session };
-      const live: LiveSession = new LiveSession(() => c.openHerdr(session.socketPath), {
+      const live: LiveSession = new LiveSession(() => openSocket(session.socketPath), {
         // Retrying cannot fix a dead SSH session or an sshd that forbids socket forwarding.
         fatalCodes: ['ERR_NO_SESSION', 'ERR_FORWARDING_PROHIBITED'],
         onAlert: (a) => handleAlert(server, session.name, live, a),
@@ -188,7 +197,7 @@ export default function App() {
       return { session, live };
     });
     return { name: 'sessions', server, entries, herdrFound: discovery.herdrFound, setup } satisfies Route;
-  }, [handleAlert]);
+  }, [handleAlert, openSocket]);
 
   /** Shows a sessions route and handles a notification tap that arrived before it was connected. */
   const showSessions = useCallback((route: SessionsRoute) => {
@@ -212,7 +221,7 @@ export default function App() {
   }, [openTarget]);
 
   const loadSessions = useCallback(
-    async (server: ServerProfile, c: ServerConnection) => showSessions(startSessions(server, c, await c.discoverSessions(server.herdrPath))),
+    async (server: ServerProfile, c: ServerConnection) => showSessions(startSessions(server, await c.discoverSessions(server.herdrPath))),
     [showSessions, startSessions],
   );
 
@@ -250,7 +259,7 @@ export default function App() {
       const route = await step(
         id,
         4,
-        async () => startSessions(server, c, await c.discoverSessions(server.herdrPath)),
+        async () => startSessions(server, await c.discoverSessions(server.herdrPath)),
         (r) => `${r.entries.length} session${r.entries.length === 1 ? '' : 's'}`,
       );
       const first = route.entries.find((e) => e.live)?.live;
@@ -298,6 +307,68 @@ export default function App() {
     setError(describeSshError(e));
     setRoute({ name: 'servers' });
   }, []);
+
+  const resuming = useRef(false);
+  const [resumeNote, setResumeNote] = useState<string | null>(null);
+
+  /**
+   * Back in the foreground (or on Reconnect): if the SSH session died meanwhile, open a new one
+   * in place with the pinned key, and let every live view retry. The screen, selection, last
+   * output and scroll positions stay as they were.
+   */
+  const resume = useCallback(async () => {
+    const r = routeRef.current;
+    const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
+    if (!parent || !conn.current || resuming.current) return;
+    const server = parent.server;
+    resuming.current = true;
+    try {
+      await resumeConnection({
+        current: () => conn.current,
+        reopen: async () => {
+          const pin = await pins.get(server.host, server.port);
+          if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
+          return ServerConnection.open({ ...server, ...(await credentialsFor(server)) }, pin);
+        },
+        install: (next) => {
+          conn.current = next as ServerConnection;
+        },
+        lives: lives.current,
+        onReconnecting: () => setResumeNote('The connection dropped while the app was in the background. Reconnecting…'),
+      });
+      setResumeNote(null);
+    } catch (e) {
+      setResumeNote(`Reconnecting failed: ${describeSshError(e)}`);
+    } finally {
+      resuming.current = false;
+    }
+  }, [pins, credentialsFor]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void resume();
+    });
+    return () => sub.remove();
+  }, [resume]);
+
+  // A live view that loses its SSH session while the app is open reconnects too, at most every 10 s.
+  const lastAutoResume = useRef(0);
+  const liveList = route.name === 'workspace' ? route.parent.entries : route.name === 'sessions' ? route.entries : null;
+  useEffect(() => {
+    const subs = (liveList ?? []).flatMap((e) =>
+      e.live
+        ? [
+            e.live.subscribe((st) => {
+              if (st.status !== 'offline' || AppState.currentState !== 'active') return;
+              if (Date.now() - lastAutoResume.current < 10_000) return;
+              lastAutoResume.current = Date.now();
+              void resume();
+            }),
+          ]
+        : [],
+    );
+    return () => subs.forEach((u) => u());
+  }, [liveList, resume]);
 
   const open = useCallback(
     async (server: ServerProfile) => {
@@ -559,11 +630,8 @@ export default function App() {
           sel={r.sel}
           onSelect={(sel) => setRoute((cur) => (cur.name === 'workspace' && cur.live === r.live ? { ...cur, sel } : cur))}
           onBack={() => (skipsSessions(r.parent) ? home() : setRoute(r.parent))}
-          onReconnect={() => {
-            const server = r.parent.server;
-            home();
-            void open(server);
-          }}
+          onReconnect={() => void resume()}
+          notice={resumeNote}
           viewed={viewed}
           onViewPane={onViewPane}
           onAction={(target) => setSheet({ live: r.live, target })}
