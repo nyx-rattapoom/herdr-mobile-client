@@ -91,6 +91,25 @@ describe('LiveSession', () => {
     live.stop();
   });
 
+  it('does not alert for agents already blocked at connect, but does after a reconnect', async () => {
+    const { server, live, alerts, setSnap } = setup();
+    setSnap(snap(['w1:p1'], [{ pane_id: 'w1:p1', agent_status: 'blocked' }]));
+    void live.start();
+    await settle(200);
+    expect(live.getState().agents.get('w1:p1')?.status).toBe('blocked');
+    expect(alerts).toEqual([]);
+    // Agent finishes and a new one blocks while the subscription is down.
+    setSnap(snap(['w1:p1'], [{ pane_id: 'w1:p1', agent_status: 'working' }]));
+    const sub = server.subscriptions[server.subscriptions.length - 1];
+    server.emit(sub, 'pane_updated', {});
+    await settle(300);
+    setSnap(snap(['w1:p1'], [{ pane_id: 'w1:p1', agent_status: 'blocked' }]));
+    sub.serverClose('eof');
+    await settle(800);
+    expect(alerts.map((a) => a.kind)).toEqual(['blocked']);
+    live.stop();
+  });
+
   it('reconnects with backoff after events_lost', async () => {
     const { server, live } = setup();
     void live.start();

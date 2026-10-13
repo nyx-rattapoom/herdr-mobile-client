@@ -63,6 +63,8 @@ export class LiveSession {
   private refreshAgain = false;
   private attempt = 0;
   private stopped = false;
+  /** The first snapshot is a baseline: agents already blocked when we connect don't alert. */
+  private baselined = false;
   private readonly opts: Required<Omit<LiveOptions, 'onAlert'>> & Pick<LiveOptions, 'onAlert'>;
 
   constructor(
@@ -206,7 +208,8 @@ export class LiveSession {
         if (this.stopped) return;
         const panes = this.paneIds(snapshot);
         this.update({ status: 'live', error: undefined, snapshot, tree: buildTree(snapshot) });
-        this.setAgents(agentsFromSnapshot(snapshot));
+        this.setAgents(agentsFromSnapshot(snapshot), this.baselined);
+        this.baselined = true;
         if (panes.join(',') !== this.subscribedPanes) {
           await this.resubscribe(panes);
           this.refreshAgain = true; // Events between the read and the new subscription.
@@ -220,8 +223,8 @@ export class LiveSession {
     }
   }
 
-  private setAgents(next: AgentMap): void {
-    const alerts = agentAlerts(this.state.agents, next);
+  private setAgents(next: AgentMap, alert = true): void {
+    const alerts = alert ? agentAlerts(this.state.agents, next) : [];
     this.update({ agents: next });
     alerts.forEach((a) => this.opts.onAlert?.(a));
   }
