@@ -195,3 +195,21 @@ Emulator evidence (screenshots `sec-*`):
 - **L3**: password logins still work: the fallback and password profiles connect (`Accepted password` in sshd). The 2FA/OTP refusal is covered by JVM tests (the test sshd has no keyboard-interactive challenge).
 - **L6**: the installed package has no `ALLOW_BACKUP` in `pkgFlags`. The hidden-input toggle shows `••••••••` (`sec-02`). With "Hide app content from screenshots" on, the window flags include `SECURE` and `screencap` yields no image. Turned off, screenshots work again (`sec-03`).
 - **L9**: after Forget host key, reconnecting shows "Confirming the host key again…", "Previously pinned … SHA256:9LrZ…/o · Same key as before" and `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` (`sec-04`).
+
+## Fixes from agent testing with opencode (2026-10-13)
+
+Reported by black-box testing against `herdr-test-agent` (real opencode).
+
+**Pane view rendered block and box characters as loose tiles, with drifting columns.**
+- Cause: each line was one `Text` in Android's `monospace` font. That font lacks U+2580–259F block elements and most box drawing, so those characters came from fallback fonts with other advance widths. `lineHeight` was taller than the glyphs, and span backgrounds filled only the glyph box.
+- Fix: `src/live/grid.ts` lays each line out on a cell grid. Backgrounds are full-cell rectangles. Block elements (all of U+2580–259F, including shades and quadrants) are filled rectangles. Light and heavy box drawing (U+2500–2503, 250C–254B, 2574–257F) are line segments from the cell centre, and ╭╮╯╰ are rounded corners. ASCII/Latin text stays in runs. Every other character gets its own cell or cells, using East Asian wide/emoji widths, so a fallback glyph can't shift what follows. The cell width is measured from the font on the device. Panes wider than the phone scroll sideways instead of wrapping. No font is bundled: alignment no longer depends on font coverage. Double and dashed lines are still drawn by the font, so they can show small gaps.
+- Tests: grid (layout, wide chars, combining marks, backgrounds, blocks, tabs, inverse). The box-drawing table was checked against the Unicode character names for all 80 code points.
+- Evidence: `fix-pane-grid-before.png` / `fix-pane-grid-after.png` (opencode start screen in w2:p1), `fix-pane-grid-coverage.png` (rounded/heavy/double/dashed boxes, shades, quadrants, eighths, 24-bit progress bar, CJK, emoji, cell backgrounds, inverse). Vertical scrolling and "↓ Latest" still work (`seq 1 200`). The horizontal-scroll path has not been exercised on the emulator because no test pane is wider than the phone.
+
+**"connection closed: eof" banner on a blank pane.**
+- Cause: Herdr's socket server reads one request per connection, answers it, and closes the connection; only subscriptions and waits stay open (`handle_connection_with_stop` in herdr `src/api/server.rs`; reproduced with a raw socket client in the container). `LiveSession` reused its request connection until it noticed the close. A `pane.read` written just before the server's EOF was never answered and failed with "connection closed: eof". `PaneReader` cleared the error only when the text changed, which never happens on a blank pane, so the banner stayed. The `events.subscribe … stream_closed` log lines are the client replacing its subscription; they aren't the cause.
+- Fix: every request opens its own connection, and the next successful read after a failure is always re-emitted, which clears the banner. The fake server in tests now behaves like Herdr: it answers the first line, ignores the rest and sends EOF.
+- Tests: liveSession (back-to-back requests on fresh connections, which failed with the eof before the fix), paneReader (recovery on an unchanged blank pane).
+- Evidence: a blank pane (`clear; sleep`) stayed open for 18 s with no banner, and five back/reopen cycles showed none (`fix-pane-blank.png`). A freshly started opencode opened within about 1 s showed no banner and filled in when its TUI drew.
+
+**Agent prompt before the agent is ready** (Herdr reports opencode idle before its TUI draws, so the prompt is lost). In Agent-prompt mode, the input bar now warns when the pane has nothing on screen yet. It doesn't block sending (`fix-agent-not-ready.png`, from a blank pane Herdr detects as opencode). It doesn't show on a pane that has drawn.
