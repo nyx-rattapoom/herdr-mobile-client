@@ -65,6 +65,11 @@ export default function App() {
     reload();
   }, [reload]);
 
+  // Channel + permission before any alert can fire (Android 13+ asks once).
+  useEffect(() => {
+    void setupNotifications();
+  }, []);
+
   const home = useCallback(() => {
     lives.current.forEach((l) => l.stop());
     lives.current = [];
@@ -123,7 +128,6 @@ export default function App() {
     setRoute(route);
     routeRef.current = route;
     startBackgroundMonitoring(`Watching agents on ${server.label}`);
-    void setupNotifications();
     // A notification tap that arrived before this server was connected.
     const tap = pendingTap.current;
     if (tap?.serverId === server.id) {

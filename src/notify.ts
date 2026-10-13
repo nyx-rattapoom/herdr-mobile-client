@@ -33,8 +33,9 @@ export async function setupNotifications(): Promise<boolean> {
 
 export function postAgentNotification(title: string, body: string, target: AlertTarget) {
   return Notifications.scheduleNotificationAsync({
-    content: { title, body, data: target, ...(Platform.OS === 'android' ? { channelId: AGENT_CHANNEL } : {}) },
-    trigger: null,
+    content: { title, body, data: target },
+    // Immediate delivery; on Android the channel is chosen through the trigger.
+    trigger: Platform.OS === 'android' ? { channelId: AGENT_CHANNEL } : null,
   });
 }
 
