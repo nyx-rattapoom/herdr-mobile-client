@@ -1,3 +1,5 @@
+import { execFileSync } from 'child_process';
+
 import {
   DISCOVERY_COMMAND,
   discoveryCommand,
@@ -6,6 +8,7 @@ import {
   installCommand,
   parseDiscovery,
   parseSessionList,
+  shellQuote,
   startServerCommand,
   validateHerdrPath,
 } from '../protocol/sessions';
@@ -28,6 +31,12 @@ describe('server scripts', () => {
     }
   });
 
+  it('are valid POSIX shell (sh -n)', () => {
+    for (const c of [discoveryCommand(), discoveryCommand('~/bin/herdr'), installCommand(), startServerCommand('/opt/h/herdr')]) {
+      expect(() => execFileSync('sh', ['-n', '-c', body(c)], { stdio: 'pipe' })).not.toThrow();
+    }
+  });
+
   it('discovery prefers a configured path, then PATH, then the login shell, then ~/.local/bin', () => {
     const c = body(discoveryCommand('~/tools/herdr'));
     const order = ['"$HOME"/tools/herdr', 'command -v herdr 2>/dev/null', '"$SHELL" -lc', '$HOME/.local/bin/herdr'].map((s) => c.indexOf(s));
@@ -44,6 +53,13 @@ describe('server scripts', () => {
     const c = body(installCommand());
     expect(c).toContain('https://herdr.dev/install.sh -o "$T"');
     expect(c.indexOf('exit 92')).toBeLessThan(c.indexOf('sh "$T"'));
+  });
+});
+
+describe('shellQuote', () => {
+  it('single-quotes and escapes embedded quotes', () => {
+    expect(shellQuote('/home/u/.config/herdr/herdr.sock')).toBe("'/home/u/.config/herdr/herdr.sock'");
+    expect(shellQuote("a'b")).toBe("'a'\\''b'");
   });
 });
 

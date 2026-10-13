@@ -121,6 +121,11 @@ export function parseSessionList(json: string): HerdrSession[] | null {
   return out;
 }
 
+/** POSIX single-quote quoting for one command argument. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 // ---- Install and start -----------------------------------------------------------------
 
 export const INSTALLER_URL = 'https://herdr.dev/install.sh';
@@ -155,7 +160,7 @@ export function startServerCommand(herdrPath?: string): string {
       'nohup "$H" server </dev/null >/dev/null 2>&1 &',
       'i=0; while [ $i -lt 20 ]; do [ -S "$S" ] && exit 0; sleep 0.5; i=$((i+1)); done',
       'exit 94',
-    ].join('; '),
+    ].join('\n'), // newline-separated: "&;" would be a syntax error
   );
 }
 

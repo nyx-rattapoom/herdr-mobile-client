@@ -7,11 +7,15 @@ import {
   installCommand,
   parseDiscovery,
   startServerCommand,
+  shellQuote,
   type DiscoveryResult,
   type InstallOutcome,
 } from '../protocol/sessions';
 import type { Transport } from '../protocol/transport';
 import type { HostKeyPin } from './pinning';
+
+const FORWARDING_PROHIBITED_TEXT =
+  "This server's sshd doesn't allow Unix-socket forwarding (AllowStreamLocalForwarding). Ask the admin to enable it for your user.";
 
 /** Herdr socket connection tunnelled over a direct-streamlocal SSH channel. */
 class SshSocketTransport implements Transport {
@@ -80,8 +84,32 @@ export class ServerConnection {
   }
 
   async openHerdr(socketPath: string): Promise<HerdrClient> {
-    const channelId = await HerdrSsh.openSocket(this.sessionId, socketPath);
+    let channelId: string;
+    try {
+      channelId = await HerdrSsh.openSocket(this.sessionId, socketPath);
+    } catch (e) {
+      throw await this.explainOpenFailure(e, socketPath);
+    }
     return new HerdrClient(new SshSocketTransport(channelId));
+  }
+
+  /**
+   * OpenSSH answers both "no such socket" and "AllowStreamLocalForwarding no" with the same
+   * generic open failure, so look at the server: if the socket exists, forwarding was refused.
+   */
+  private async explainOpenFailure(e: unknown, socketPath: string): Promise<unknown> {
+    if ((e as { code?: string })?.code !== 'ERR_SOCKET_UNAVAILABLE') return e;
+    try {
+      const res = await HerdrSsh.exec(this.sessionId, `test -S ${shellQuote(socketPath)} && echo SOCKET_EXISTS`);
+      if (res.stdout.includes('SOCKET_EXISTS')) {
+        return Object.assign(new Error(FORWARDING_PROHIBITED_TEXT), {
+          code: 'ERR_FORWARDING_PROHIBITED',
+        });
+      }
+    } catch {
+      // Keep the original error.
+    }
+    return e;
   }
 
   close() {
@@ -95,6 +123,13 @@ export const probeHostKey = (host: string, port: number) => HerdrSsh.probeHostKe
 export function describeSshError(e: unknown): string {
   const code = (e as { code?: string })?.code;
   const msg = (e as { message?: string })?.message ?? String(e);
+  // expo-secure-store rejections from the biometric vault.
+  if (/canceled the authentication|User canceled|authentication was canceled/i.test(msg)) {
+    return 'Unlock cancelled. Saved credentials stay locked until you authenticate.';
+  }
+  if (/Could not Authenticate|KeyPermanentlyInvalidated|Key user not authenticated/i.test(msg)) {
+    return 'Could not unlock saved credentials. If you changed fingerprints or face unlock, re-enter passwords and recreate the device key.';
+  }
   switch (code) {
     case 'ERR_HOSTKEY_MISMATCH':
       return 'The server host key does not match the pinned key. Connection blocked.';
@@ -103,7 +138,7 @@ export function describeSshError(e: unknown): string {
     case 'ERR_TIMEOUT':
       return 'Connection timed out.';
     case 'ERR_FORWARDING_PROHIBITED':
-      return "This server's sshd doesn't allow Unix-socket forwarding (AllowStreamLocalForwarding). Ask the admin to enable it for your user.";
+      return FORWARDING_PROHIBITED_TEXT;
     case 'ERR_SOCKET_UNAVAILABLE':
       return "Herdr isn't running on this server (its socket isn't accepting connections).";
     case 'ERR_CONNECT':
