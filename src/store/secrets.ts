@@ -12,10 +12,15 @@ const VAULT_KEY = 'vault.v1';
 export class Secrets implements KeyValueStore {
   private cache: Record<string, string> | null = null;
 
+  /**
+   * @param ready resolves once settings are loaded; every operation waits for it so a secret
+   *   written during startup can't land in the plain store while biometrics are on.
+   */
   constructor(
     private readonly plain: KeyValueStore,
     private readonly vault: KeyValueStore,
     private readonly biometric: () => boolean,
+    private readonly ready: Promise<unknown> = Promise.resolve(),
   ) {}
 
   lock(): void {
@@ -27,11 +32,13 @@ export class Secrets implements KeyValueStore {
   }
 
   async getItem(key: string): Promise<string | null> {
+    await this.ready;
     if (!this.biometric()) return this.plain.getItem(key);
     return (await this.load())[key] ?? null;
   }
 
   async setItem(key: string, value: string): Promise<void> {
+    await this.ready;
     if (!this.biometric()) return this.plain.setItem(key, value);
     const blob = { ...(await this.load()), [key]: value };
     await this.vault.setItem(VAULT_KEY, JSON.stringify(blob));
@@ -39,6 +46,7 @@ export class Secrets implements KeyValueStore {
   }
 
   async deleteItem(key: string): Promise<void> {
+    await this.ready;
     await this.plain.deleteItem(key);
     if (!this.biometric()) return;
     const blob = { ...(await this.load()) };
@@ -60,9 +68,13 @@ export class Secrets implements KeyValueStore {
     for (const k of keys) await this.plain.deleteItem(k);
   }
 
-  /** Moves everything back to plain items. Returns false if the vault could not be read. */
+  /**
+   * Moves everything back to plain items. Reads the vault afresh (never the in-memory cache), so
+   * Android requires a new authentication. Returns false if the vault could not be read.
+   */
   async disableBiometric(): Promise<boolean> {
-    const raw = this.cache ?? (await this.readVault());
+    this.cache = null;
+    const raw = await this.readVault();
     if (raw === null) return false;
     for (const [k, v] of Object.entries(raw)) await this.plain.setItem(k, v);
     await this.vault.deleteItem(VAULT_KEY);

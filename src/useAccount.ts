@@ -31,7 +31,10 @@ export type Credentials = { password?: string; privateKey?: string };
 
 // App-wide singletons: one settings object, one secrets store.
 const current: Settings = { biometric: false };
-const secrets = new Secrets(plainKv, vaultKv, () => current.biometric);
+const settingsReady = loadSettings(plainKv).then((s) => {
+  current.biometric = s.biometric;
+});
+const secrets = new Secrets(plainKv, vaultKv, () => current.biometric, settingsReady);
 const servers = new ServerStore(plainKv, undefined, secrets);
 const pins = new PinStore(plainKv);
 const deviceKey = new DeviceKeyStore(plainKv, secrets, (c) => HerdrSsh.generateEd25519(c));
@@ -44,10 +47,7 @@ export function useAccount() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
 
   useEffect(() => {
-    void loadSettings(plainKv).then((s) => {
-      current.biometric = s.biometric;
-      setSettings({ ...current });
-    });
+    void settingsReady.then(() => setSettings({ ...current }));
     void deviceKey.publicKey().then(setPublicKey);
     void (async () => {
       const ok =
@@ -98,6 +98,9 @@ export function useAccount() {
           throw e;
         }
       } else {
+        // Turning protection off must be re-authorised now, not ride on an earlier unlock.
+        const auth = await LocalAuthentication.authenticateAsync({ promptMessage: 'Turn off credential protection' });
+        if (!auth.success) throw new Error('Biometric confirmation was cancelled.');
         if (!(await secrets.disableBiometric())) {
           throw new Error('Could not unlock the protected credentials (biometrics may have changed).');
         }

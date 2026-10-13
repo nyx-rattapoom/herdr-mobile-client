@@ -65,6 +65,33 @@ describe('Secrets', () => {
     expect(await s.disableBiometric()).toBe(false);
   });
 
+  it('waits for settings before touching secrets (review L4)', async () => {
+    const plain = new MemoryKv();
+    const vault = new MemoryKv();
+    let bio = false;
+    let markReady!: () => void;
+    const ready = new Promise<void>((r) => (markReady = r));
+    const s = new Secrets(plain, vault, () => bio, ready);
+    await s.enableBiometric([]); // vault exists
+    const write = s.setItem('pw.early', 'x');
+    bio = true; // settings finish loading with biometrics on
+    markReady();
+    await write;
+    expect(plain.map.has('pw.early')).toBe(false);
+    s.lock();
+    expect(await s.getItem('pw.early')).toBe('x');
+  });
+
+  it('disabling re-reads the vault instead of using the unlocked cache (review L5)', async () => {
+    const { vault, s, setBio } = setup();
+    setBio(true);
+    await s.enableBiometric([]);
+    await s.setItem('pw.a', '1');
+    const reads = vault.reads;
+    expect(await s.disableBiometric()).toBe(true);
+    expect(vault.reads).toBe(reads + 1);
+  });
+
   it('persists settings with safe defaults', async () => {
     const kv = new MemoryKv();
     expect(await loadSettings(kv)).toEqual({ biometric: false });
