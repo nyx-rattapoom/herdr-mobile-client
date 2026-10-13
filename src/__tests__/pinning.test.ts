@@ -1,4 +1,4 @@
-import { PinStore, decidePin, endpointId } from '../ssh/pinning';
+import { PinStore, decidePin, endpointId, hostKeyFileHint } from '../ssh/pinning';
 import { MemoryKv } from '../testing/fakes';
 
 const keyA = { algorithm: 'ssh-ed25519', key: 'AAAAC3NzaC1lZDI1NTE5AAAAIA==', fingerprint: 'SHA256:aaaa' };
@@ -68,5 +68,34 @@ describe('PinStore', () => {
     const store = new PinStore(new MemoryKv());
     await expect(store.pin('fe80::1%wlan0', 22, keyA)).resolves.toBeTruthy();
     expect(endpointId(' Host ', 22)).toBe('host:22');
+  });
+});
+
+describe('forgotten pins and hints (review L9)', () => {
+  it('remembers the forgotten fingerprint until the endpoint is pinned again', async () => {
+    const store = new PinStore(new MemoryKv(), () => 7);
+    await store.pin('h', 22, keyA);
+    expect(await store.previous('h', 22)).toBeNull();
+    await store.forget('h', 22);
+    expect(await store.get('h', 22)).toBeNull();
+    expect(await store.previous('h', 22)).toEqual({ algorithm: 'ssh-ed25519', fingerprint: keyA.fingerprint, forgottenAt: 7 });
+    await store.pin('h', 22, keyB);
+    expect(await store.previous('h', 22)).toBeNull();
+  });
+
+  it('purge removes the pin and its history', async () => {
+    const store = new PinStore(new MemoryKv());
+    await store.pin('h', 22, keyA);
+    await store.forget('h', 22);
+    await store.purge('h', 22);
+    expect(await store.previous('h', 22)).toBeNull();
+  });
+
+  it('derives the host key file from the algorithm', () => {
+    expect(hostKeyFileHint('ssh-ed25519')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub');
+    expect(hostKeyFileHint('ecdsa-sha2-nistp256')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub');
+    expect(hostKeyFileHint('rsa-sha2-512')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub');
+    expect(hostKeyFileHint('ssh-rsa')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub');
+    expect(hostKeyFileHint('weird')).toContain('ssh_host_*_key.pub');
   });
 });

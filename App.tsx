@@ -28,7 +28,7 @@ import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, colors } from './src/screens/ui';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
-import { decidePin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
+import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import type { ServerProfile } from './src/store/servers';
 import { useAccount } from './src/useAccount';
 
@@ -38,7 +38,12 @@ type Route =
   | { name: 'edit'; server: ServerProfile; hasPassword: boolean }
   | { name: 'settings' }
   | { name: 'busy'; label: string }
-  | { name: 'hostkey'; server: ServerProfile; decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }> }
+  | {
+      name: 'hostkey';
+      server: ServerProfile;
+      decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }>;
+      previous: ForgottenPin | null;
+    }
   | { name: 'sessions'; server: ServerProfile; entries: SessionEntry[]; herdrFound: boolean; setup?: SetupState }
   | { name: 'pane'; parent: Extract<Route, { name: 'sessions' }>; live: LiveSession; pane: PaneNode };
 
@@ -201,7 +206,7 @@ export default function App() {
         const presented = await probeHostKey(server.host, server.port);
         const decision = decidePin(await pins.get(server.host, server.port), presented);
         if (decision.kind === 'match') return await connectPinned(server, decision.pin);
-        setRoute({ name: 'hostkey', server, decision });
+        setRoute({ name: 'hostkey', server, decision, previous: await pins.previous(server.host, server.port) });
       } catch (e) {
         fail(e);
       }
@@ -253,7 +258,7 @@ export default function App() {
             style: 'destructive',
             onPress: async () => {
               await servers.remove(server.id);
-              await pins.forget(server.host, server.port);
+              await pins.purge(server.host, server.port);
               reload();
             },
           },
@@ -386,6 +391,7 @@ export default function App() {
         <HostKeyScreen
           server={route.server}
           decision={route.decision}
+          previous={route.previous}
           onCancel={home}
           onTrust={() => trust(route.server, route.decision)}
         />

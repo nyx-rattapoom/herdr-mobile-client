@@ -1,17 +1,19 @@
 import { ScrollView, Text, View } from 'react-native';
 
-import type { PinDecision } from '../ssh/pinning';
+import { hostKeyFileHint, type ForgottenPin, type PinDecision } from '../ssh/pinning';
 import type { ServerProfile } from '../store/servers';
 import { Button, Header, colors, styles } from './ui';
 
 type Props = {
   server: ServerProfile;
   decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }>;
+  /** Set when the user forgot an earlier pin for this endpoint. */
+  previous?: ForgottenPin | null;
   onTrust: () => void;
   onCancel: () => void;
 };
 
-export function HostKeyScreen({ server, decision, onTrust, onCancel }: Props) {
+export function HostKeyScreen({ server, decision, previous, onTrust, onCancel }: Props) {
   const endpoint = `${server.host}:${server.port}`;
   if (decision.kind === 'mismatch') {
     return (
@@ -57,7 +59,20 @@ export function HostKeyScreen({ server, decision, onTrust, onCancel }: Props) {
             {k.fingerprint}
           </Text>
         </View>
-        <Text style={styles.muted}>On the server: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</Text>
+        {previous ? (
+          <View style={[styles.card, { borderColor: colors.warn }]} testID="previous-pin">
+            <Text style={[styles.text, { color: colors.warn }]}>Previously pinned (you chose “Forget host key”)</Text>
+            <Text style={[styles.mono, { marginTop: 6 }]} selectable>
+              {previous.algorithm} {previous.fingerprint}
+            </Text>
+            <Text style={[styles.muted, { marginTop: 6 }]}>
+              {previous.fingerprint === k.fingerprint
+                ? 'Same key as before.'
+                : 'The key has changed since then. Make sure the server was really re-keyed.'}
+            </Text>
+          </View>
+        ) : null}
+        <Text style={styles.muted}>On the server: {hostKeyFileHint(k.algorithm)}</Text>
         <Button testID="trust-hostkey" label="Trust and connect" onPress={onTrust} />
         <Button testID="reject-hostkey" label="Cancel" kind="secondary" onPress={onCancel} />
       </ScrollView>

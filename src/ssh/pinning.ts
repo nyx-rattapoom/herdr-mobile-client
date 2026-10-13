@@ -33,11 +33,26 @@ export function endpointId(host: string, port: number): string {
 }
 
 /** SecureStore keys allow only [A-Za-z0-9._-]. */
-function storageKey(host: string, port: number): string {
+function storageKey(host: string, port: number, prefix = 'pin'): string {
   const id = endpointId(host, port);
   let hex = '';
   for (const b of new TextEncoder().encode(id)) hex += b.toString(16).padStart(2, '0');
-  return `pin.${hex}`;
+  return `${prefix}.${hex}`;
+}
+
+/** A pin the user removed with "Forget host key", kept so the next confirmation can show it. */
+export type ForgottenPin = { algorithm: string; fingerprint: string; forgottenAt: number };
+
+/** Where to read the server's own fingerprint for a key type (shown on the confirm screen). */
+export function hostKeyFileHint(algorithm: string): string {
+  const file = algorithm.includes('ed25519')
+    ? 'ssh_host_ed25519_key.pub'
+    : algorithm.startsWith('ecdsa-')
+      ? 'ssh_host_ecdsa_key.pub'
+      : algorithm.includes('rsa')
+        ? 'ssh_host_rsa_key.pub'
+        : null;
+  return file ? `ssh-keygen -lf /etc/ssh/${file}` : 'for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done';
 }
 
 export class PinStore {
@@ -70,10 +85,33 @@ export class PinStore {
     if (existing) return existing;
     const pin: HostKeyPin = { algorithm: key.algorithm, key: key.key, fingerprint: key.fingerprint, pinnedAt: this.now() };
     await this.kv.setItem(storageKey(host, port), JSON.stringify(pin));
+    await this.kv.deleteItem(storageKey(host, port, 'pinprev'));
     return pin;
   }
 
+  /** Removes the pin, remembering its fingerprint for the next confirmation screen. */
   async forget(host: string, port: number): Promise<void> {
+    const old = await this.get(host, port);
+    if (old) {
+      const prev: ForgottenPin = { algorithm: old.algorithm, fingerprint: old.fingerprint, forgottenAt: this.now() };
+      await this.kv.setItem(storageKey(host, port, 'pinprev'), JSON.stringify(prev));
+    }
     await this.kv.deleteItem(storageKey(host, port));
+  }
+
+  /** The most recently forgotten pin for this endpoint, if it has not been re-pinned since. */
+  async previous(host: string, port: number): Promise<ForgottenPin | null> {
+    try {
+      const v = JSON.parse((await this.kv.getItem(storageKey(host, port, 'pinprev'))) ?? 'null');
+      return v && typeof v.fingerprint === 'string' ? (v as ForgottenPin) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Removing a server clears everything about its endpoint. */
+  async purge(host: string, port: number): Promise<void> {
+    await this.kv.deleteItem(storageKey(host, port));
+    await this.kv.deleteItem(storageKey(host, port, 'pinprev'));
   }
 }
