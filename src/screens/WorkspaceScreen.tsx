@@ -18,6 +18,7 @@ import {
 import { LiveBanner, LiveStatusLine } from './LiveBanner';
 import { PaneView } from './PaneView';
 import { StatusDot } from './SessionsScreen';
+import { SlashButton } from './SlashPalette';
 import { AgentsButton, AgentsSheet } from './AgentsSheet';
 import { Button, colors, sheet, styles } from './ui';
 
@@ -151,6 +152,14 @@ export function WorkspaceScreen(p: Props) {
           live={p.live}
           paneId={pane.pane_id}
           footer={p.footer ? (poke, blank) => p.footer?.(pane.pane_id, poke, blank) : undefined}
+          overlay={(poke) => (
+            <SlashButton
+              live={p.live}
+              paneId={pane.pane_id}
+              agent={st.agents.get(pane.pane_id)?.agent ?? pane.agent}
+              onSent={poke}
+            />
+          )}
         />
       ) : (
         <View style={styles.center}>

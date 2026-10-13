@@ -1,0 +1,22 @@
+     - fresh.txt (9B): "first-try"
+     - grid.txt (63B): 123456789
+       234567891
+       345678912
+       456789123
+       567891234
+  ┃ /agents       Switch agent                     ┃
+  ┃ /compact      Compact session                  ┃
+  ┃ /connect      Connect provider                 ┃
+  ┃ /copy         Copy session transcript          ┃
+  ┃ /debug        View debug info                  ┃
+  ┃ /diff         Open diff viewer                 ┃
+  ┃ /editor       Open editor                      ┃
+  ┃ /exit         Exit the app                     ┃
+  ┃ /export       Export session transcript        ┃
+  ┃ /fork         Fork session                     ┃
+  ┃
+  ┃  /
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /home/herdr/demo       8.2K (4%)  ctrl+p commands
