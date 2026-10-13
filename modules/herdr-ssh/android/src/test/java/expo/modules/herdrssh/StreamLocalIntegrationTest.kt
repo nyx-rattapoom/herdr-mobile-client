@@ -1,6 +1,7 @@
 package expo.modules.herdrssh
 
 import com.jcraft.jsch.ChannelDirectStreamLocal
+import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
 import com.jcraft.jsch.JSchUnknownHostKeyException
@@ -70,6 +71,48 @@ class StreamLocalIntegrationTest {
       ch.disconnect()
     } finally {
       s.disconnect()
+    }
+  }
+
+  private fun exec(s: Session, cmd: String): String {
+    val ch = s.openChannel("exec") as ChannelExec
+    ch.setCommand(cmd)
+    val out = ch.inputStream
+    ch.connect(10_000)
+    val text = out.bufferedReader().readText()
+    ch.disconnect()
+    return text
+  }
+
+  @Test
+  fun deviceKeyAuthenticatesWithoutPassword() {
+    val (user, pw, host, port) = parts()
+    val hostKey = probe(user, host, port)
+    val k = Keys.generateEd25519("herdr-client-test")
+    val pub = k.getValue("publicKey")
+    val marker = pub.split(" ")[1]
+    // Install the key using a password session.
+    val admin = session(user, host, port, PinnedHostKeyRepository(hostKey)).apply {
+      setPassword(pw)
+      setConfig("PreferredAuthentications", "password")
+      connect(10_000)
+    }
+    try {
+      exec(admin, "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys")
+      val jsch = JSch()
+      jsch.addIdentity("device", k.getValue("privateKey").toByteArray(), null, null)
+      jsch.hostKeyRepository = PinnedHostKeyRepository(hostKey)
+      val s = jsch.getSession(user, host, port.toInt()).apply {
+        setConfig("StrictHostKeyChecking", "yes")
+        setConfig("PreferredAuthentications", "publickey")
+      }
+      s.connect(10_000)
+      assertTrue(exec(s, "echo key-ok").contains("key-ok"))
+      s.disconnect()
+    } finally {
+      // Base64 may contain '/', so match it as a fixed string.
+      exec(admin, "grep -vF '$marker' ~/.ssh/authorized_keys > ~/.ssh/ak.tmp; mv ~/.ssh/ak.tmp ~/.ssh/authorized_keys")
+      admin.disconnect()
     }
   }
 }
