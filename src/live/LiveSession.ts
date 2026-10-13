@@ -39,6 +39,11 @@ export type LiveState = {
   snapshot?: SessionSnapshot;
   tree: WorkspaceNode[];
   agents: AgentMap;
+  /**
+   * pane_id → when the phone saw that agent's status change (ms since epoch). 0 for statuses
+   * already present at the first snapshot, whose start time is unknown.
+   */
+  since: Map<string, number>;
 };
 
 export type LiveOptions = {
@@ -50,6 +55,8 @@ export type LiveOptions = {
   /** Errors from `open` with these codes mean the SSH session is gone; stop retrying. */
   fatalCodes?: string[];
   onAlert?: (a: AgentAlert) => void;
+  /** Clock for status-change times; tests replace it. */
+  now?: () => number;
 };
 
 /**
@@ -58,7 +65,7 @@ export type LiveOptions = {
  * `session.snapshot` read, as Herdr's socket docs prescribe.
  */
 export class LiveSession {
-  private state: LiveState = { status: 'connecting', tree: [], agents: new Map() };
+  private state: LiveState = { status: 'connecting', tree: [], agents: new Map(), since: new Map() };
   private listeners = new Set<(s: LiveState) => void>();
   private sub: HerdrClient | null = null;
   private subscribedPanes = '';
@@ -86,6 +93,7 @@ export class LiveSession {
       maxRetryMs: opts.maxRetryMs ?? 15_000,
       fatalCodes: opts.fatalCodes ?? ['ERR_NO_SESSION'],
       onAlert: opts.onAlert,
+      now: opts.now ?? Date.now,
     };
   }
 
@@ -291,7 +299,13 @@ export class LiveSession {
 
   private setAgents(next: AgentMap, alert = true): void {
     const alerts = alert ? agentAlerts(this.state.agents, next) : [];
-    this.update({ agents: next });
+    const since = new Map<string, number>();
+    for (const [paneId, a] of next) {
+      const prev = this.state.agents.get(paneId);
+      const known = this.state.since.get(paneId);
+      since.set(paneId, prev?.status === a.status && known !== undefined ? known : alert ? this.opts.now() : 0);
+    }
+    this.update({ agents: next, since });
     alerts.forEach((a) => this.opts.onAlert?.(a));
   }
 

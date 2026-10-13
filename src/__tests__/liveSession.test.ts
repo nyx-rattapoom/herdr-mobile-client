@@ -262,4 +262,25 @@ describe('LiveSession', () => {
     await settle(1_200);
     await expect(timedOut).resolves.toMatchObject({ status: 'connecting' });
   });
+
+  it('records when each agent status changed, with 0 for statuses present at connect', async () => {
+    const server = new FakeHerdr((t) => new HerdrClient(t, 60_000));
+    let clock = 5_000;
+    server.handlers['events.subscribe'] = () => ({ type: 'subscription_started' });
+    server.handlers['session.snapshot'] = () => snap(['w1:p1'], [{ pane_id: 'w1:p1', agent_status: 'done' }]);
+    const live = new LiveSession(server.open, { debounceMs: 50, retryMs: 100, now: () => clock });
+    void live.start();
+    await settle(200);
+    expect(live.getState().since.get('w1:p1')).toBe(0);
+    clock = 9_000;
+    const sub = server.subscriptions[server.subscriptions.length - 1];
+    server.emit(sub, 'pane.agent_status_changed', { pane_id: 'w1:p1', agent_status: 'working', agent: 'fake' });
+    await settle(1);
+    expect(live.getState().since.get('w1:p1')).toBe(9_000);
+    clock = 12_000;
+    server.emit(sub, 'pane.agent_status_changed', { pane_id: 'w1:p1', agent_status: 'working', agent: 'fake' });
+    await settle(1);
+    expect(live.getState().since.get('w1:p1')).toBe(9_000);
+    live.stop();
+  });
 });

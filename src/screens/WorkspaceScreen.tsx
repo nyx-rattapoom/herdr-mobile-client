@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { ActionId, Target } from '../live/actions';
@@ -8,6 +8,7 @@ import {
   paneName,
   paneStatus,
   resolveSelection,
+  selectionForPane,
   tabName,
   tabStatus,
   workspaceName,
@@ -17,7 +18,8 @@ import {
 import { LiveBanner, LiveStatusLine } from './LiveBanner';
 import { PaneView } from './PaneView';
 import { StatusDot } from './SessionsScreen';
-import { Button, colors, styles } from './ui';
+import { AgentsButton, AgentsSheet } from './AgentsSheet';
+import { Button, colors, sheet, styles } from './ui';
 
 type Props = {
   live: LiveSession;
@@ -32,8 +34,10 @@ type Props = {
   onAction: (t: Target) => void;
   /** Runs one action directly (it still asks for a label or confirmation where needed). */
   onPick: (t: Target, id: ActionId) => void;
-  /** Extra header buttons, e.g. the agents button. */
-  headerRight?: ReactNode;
+  /** When each pane was last opened, for "unseen" done agents. */
+  viewed: Record<string, number>;
+  /** Called when a pane is shown and when it stops being shown. */
+  onViewPane: (paneId: string) => void;
   footer?: (paneId: string, pokeNow: () => void, blank: boolean) => ReactNode;
 };
 
@@ -45,8 +49,16 @@ type Props = {
 export function WorkspaceScreen(p: Props) {
   const st = useLive(p.live);
   const [switcher, setSwitcher] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const { ws, tab, pane } = resolveSelection(st.tree, p.sel);
   const select = (s: Selection) => p.onSelect(s);
+  const paneId = pane?.pane_id;
+  const { onViewPane } = p;
+  useEffect(() => {
+    if (!paneId) return;
+    onViewPane(paneId);
+    return () => onViewPane(paneId);
+  }, [paneId, onViewPane]);
 
   return (
     // Edge-to-edge Android doesn't resize the window for the keyboard; pad instead.
@@ -66,7 +78,7 @@ export function WorkspaceScreen(p: Props) {
           </Text>
           <LiveStatusLine st={st} testID={`live-${p.session}`} extra={p.host} />
         </Pressable>
-        {p.headerRight}
+        <AgentsButton live={p.live} onPress={() => setAgentsOpen(true)} />
       </View>
       {st.status !== 'live' ? (
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
@@ -156,6 +168,24 @@ export function WorkspaceScreen(p: Props) {
           ) : null}
         </View>
       )}
+      {agentsOpen ? (
+        <AgentsSheet
+          live={p.live}
+          viewed={p.viewed}
+          onClose={() => setAgentsOpen(false)}
+          onOpen={(r) => {
+            setAgentsOpen(false);
+            const s = selectionForPane(st.tree, r.paneId);
+            if (s) select(s);
+          }}
+          onClosePane={(r) => {
+            const node = st.tree.flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((x) => x.pane_id === r.paneId);
+            if (!node) return;
+            setAgentsOpen(false);
+            p.onPick({ kind: 'pane', node }, 'pane.close');
+          }}
+        />
+      ) : null}
       {switcher ? (
         <WorkspaceSheet
           live={p.live}
@@ -269,24 +299,5 @@ const ui = {
     borderWidth: 1,
     borderColor: colors.border,
     maxWidth: 220,
-  },
-};
-
-export const sheet = {
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' as const },
-  panel: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
-    paddingBottom: 28,
-  },
-  row: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
 };

@@ -101,3 +101,23 @@ export const styles = StyleSheet.create({
   errorBox: { backgroundColor: '#3a1518', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: colors.danger },
   errorText: { color: '#ffd6d7', fontSize: 14 },
 });
+
+/** Bottom-sheet styles shared by the workspace and agents sheets. */
+export const sheet = {
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' as const },
+  panel: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    paddingBottom: 28,
+  },
+  row: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+};

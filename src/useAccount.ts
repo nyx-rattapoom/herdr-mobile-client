@@ -9,7 +9,7 @@ import { DEVICE_KEY_SECRET, DeviceKeyStore } from './store/deviceKey';
 import { Secrets, loadSettings, saveSettings, type Settings } from './store/secrets';
 import { ServerStore, authOf, passwordKey, type ServerProfile } from './store/servers';
 
-const plainKv: KeyValueStore = {
+export const plainKv: KeyValueStore = {
   getItem: (k) => SecureStore.getItemAsync(k),
   setItem: (k, v) => SecureStore.setItemAsync(k, v),
   deleteItem: (k) => SecureStore.deleteItemAsync(k),

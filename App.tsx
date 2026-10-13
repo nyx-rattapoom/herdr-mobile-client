@@ -33,7 +33,10 @@ import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import { endpointInUse, type ServerProfile } from './src/store/servers';
-import { useAccount } from './src/useAccount';
+import { ViewedStore } from './src/store/viewed';
+import { plainKv, useAccount } from './src/useAccount';
+
+const viewedStore = new ViewedStore(plainKv);
 
 type Route =
   | { name: 'servers' }
@@ -80,6 +83,25 @@ export default function App() {
   /** Bumped by every new connection attempt and by cancel; stale attempts stop at their next step. */
   const attempt = useRef(0);
   const progress = useRef<ConnectProgress | null>(null);
+  const [viewed, setViewed] = useState<Record<string, number>>({});
+  const viewedKey = route.name === 'workspace' ? [route.parent.server.id, route.session] as const : null;
+  const viewedServer = viewedKey?.[0];
+  const viewedSession = viewedKey?.[1];
+  useEffect(() => {
+    if (!viewedServer || viewedSession === undefined) return;
+    let live = true;
+    void viewedStore.load(viewedServer, viewedSession).then((v) => live && setViewed(v));
+    return () => {
+      live = false;
+    };
+  }, [viewedServer, viewedSession]);
+  const onViewPane = useCallback(
+    (paneId: string) => {
+      if (!viewedServer || viewedSession === undefined) return;
+      void viewedStore.mark(viewedServer, viewedSession, paneId, Date.now()).then(setViewed);
+    },
+    [viewedServer, viewedSession],
+  );
   useEffect(() => {
     routeRef.current = route;
   }, [route]);
@@ -541,6 +563,8 @@ export default function App() {
             home();
             void open(server);
           }}
+          viewed={viewed}
+          onViewPane={onViewPane}
           onAction={(target) => setSheet({ live: r.live, target })}
           onPick={(target, id) => pickAction(r.live, target, id)}
           footer={(paneId, pokeNow, blank) => (
