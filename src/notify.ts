@@ -3,7 +3,9 @@ import { Platform } from 'react-native';
 
 import HerdrSsh from '../modules/herdr-ssh';
 
-export const AGENT_CHANNEL = 'agents';
+// Channel settings are immutable once created, so the private-on-lock-screen channel has a new id.
+export const AGENT_CHANNEL = 'agent-alerts';
+const OLD_CHANNELS = ['agents'];
 
 export type AlertTarget = { serverId: string; session: string; paneId: string };
 
@@ -23,7 +25,10 @@ export async function setupNotifications(): Promise<boolean> {
       name: 'Agent status',
       description: 'An agent is blocked waiting for you, or finished its work',
       importance: Notifications.AndroidImportance.HIGH,
+      // On a secure lock screen show only "Herdr Client", not server/agent names.
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     });
+    for (const id of OLD_CHANNELS) await Notifications.deleteNotificationChannelAsync(id).catch(() => {});
   }
   const current = await Notifications.getPermissionsAsync();
   if (current.status === 'granted') return true;

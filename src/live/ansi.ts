@@ -122,8 +122,8 @@ export function parseAnsi(input: string): Line[] {
       flushText();
       lines.push(line);
       line = [];
-    } else if (ch === '\r' || (ch < ' ' && ch !== '\t')) {
-      // Dropped: lone CR, BEL, other C0 controls.
+    } else if (ch === '\r' || (ch < ' ' && ch !== '\t') || isInvisibleControl(ch)) {
+      // Dropped: lone CR, BEL, other C0/C1 controls, bidi overrides and isolates.
     } else {
       buf += ch;
     }
@@ -131,6 +131,12 @@ export function parseAnsi(input: string): Line[] {
   flushText();
   lines.push(line);
   return lines;
+}
+
+/** DEL, C1 controls and bidi overrides/isolates (U+202A–202E, U+2066–2069). */
+function isInvisibleControl(ch: string): boolean {
+  const c = ch.charCodeAt(0);
+  return (c >= 0x7f && c <= 0x9f) || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
 }
 
 /** Plain text of a parsed line. */

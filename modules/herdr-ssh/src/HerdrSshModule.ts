@@ -22,6 +22,8 @@ declare class HerdrSshModule extends NativeModule<HerdrSshEvents> {
   /** Starts the foreground service that keeps connections alive in the background. */
   startMonitoring(text: string): void;
   stopMonitoring(): void;
+  /** Toggles FLAG_SECURE on the app window (no screenshots / recents preview). */
+  setSecureScreen(on: boolean): void;
 }
 
 export default requireNativeModule<HerdrSshModule>('HerdrSsh');

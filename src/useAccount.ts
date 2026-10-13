@@ -30,9 +30,10 @@ const vaultKv: KeyValueStore = {
 export type Credentials = { password?: string; privateKey?: string };
 
 // App-wide singletons: one settings object, one secrets store.
-const current: Settings = { biometric: false };
+const current: Settings = { biometric: false, secureScreen: false };
 const settingsReady = loadSettings(plainKv).then((s) => {
-  current.biometric = s.biometric;
+  Object.assign(current, s);
+  HerdrSsh.setSecureScreen(current.secureScreen);
 });
 const secrets = new Secrets(plainKv, vaultKv, () => current.biometric, settingsReady);
 const servers = new ServerStore(plainKv, undefined, secrets);
@@ -112,7 +113,15 @@ export function useAccount() {
     [],
   );
 
+  const setSecureScreen = useCallback(async (on: boolean) => {
+    current.secureScreen = on;
+    HerdrSsh.setSecureScreen(on);
+    await saveSettings(plainKv, current);
+    setSettings({ ...current });
+  }, []);
+
   return {
+    setSecureScreen,
     servers,
     pins,
     settings,

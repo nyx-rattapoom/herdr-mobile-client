@@ -94,11 +94,11 @@ describe('Secrets', () => {
 
   it('persists settings with safe defaults', async () => {
     const kv = new MemoryKv();
-    expect(await loadSettings(kv)).toEqual({ biometric: false });
-    await saveSettings(kv, { biometric: true });
-    expect(await loadSettings(kv)).toEqual({ biometric: true });
+    expect(await loadSettings(kv)).toEqual({ biometric: false, secureScreen: false });
+    await saveSettings(kv, { biometric: true, secureScreen: true });
+    expect(await loadSettings(kv)).toEqual({ biometric: true, secureScreen: true });
     kv.map.set('settings.v1', 'garbage');
-    expect(await loadSettings(kv)).toEqual({ biometric: false });
+    expect(await loadSettings(kv)).toEqual({ biometric: false, secureScreen: false });
   });
 });
 

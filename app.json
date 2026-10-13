@@ -18,7 +18,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "io.github.herdrclient"
+      "package": "io.github.herdrclient",
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png"

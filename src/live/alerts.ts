@@ -1,4 +1,5 @@
 import type { AgentAlert } from './agents';
+import { cleanLabel } from './text';
 
 /**
  * Suppresses repeats of the same alert for the same pane within a window. Snapshot reads can
@@ -24,9 +25,15 @@ export class AlertDeduper {
 
 export type AlertContext = { server: string; session: string; workspaceLabel?: string };
 
+/** Notification text. Server-supplied parts are sanitised and kept short (they show on the lock screen's public version only as "Herdr Client"). */
 export function formatAlert(a: AgentAlert, ctx: AlertContext): { title: string; body: string } {
-  const who = a.agent ?? 'Agent';
-  const where = [ctx.server, ctx.session !== 'default' ? ctx.session : null, ctx.workspaceLabel ?? a.workspaceId, a.paneId]
+  const who = cleanLabel(a.agent, 30) ?? 'Agent';
+  const where = [
+    cleanLabel(ctx.server, 40),
+    ctx.session !== 'default' ? cleanLabel(ctx.session, 30) : undefined,
+    cleanLabel(ctx.workspaceLabel, 30) ?? cleanLabel(a.workspaceId, 20),
+    cleanLabel(a.paneId, 20),
+  ]
     .filter(Boolean)
     .join(' · ');
   return a.kind === 'blocked'

@@ -6,6 +6,8 @@ type Props = {
   publicKey: string | null;
   biometric: boolean;
   biometricAvailable: boolean;
+  secureScreen: boolean;
+  onToggleSecureScreen: (on: boolean) => void;
   error: string | null;
   notice: string | null;
   onBack: () => void;
@@ -68,6 +70,14 @@ export function SettingsScreen(p: Props) {
             disabled={!p.biometricAvailable && !p.biometric}
             onValueChange={p.onToggleBiometric}
           />
+        </View>
+
+        <View style={[styles.card, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.text}>Hide app content from screenshots</Text>
+            <Text style={styles.muted}>Blocks screenshots, screen recording and the recent-apps preview (FLAG_SECURE).</Text>
+          </View>
+          <Switch testID="secure-screen-toggle" value={p.secureScreen} onValueChange={p.onToggleSecureScreen} />
         </View>
 
         <Text style={[styles.muted, { marginTop: 16 }]}>

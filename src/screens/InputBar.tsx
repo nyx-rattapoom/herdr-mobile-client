@@ -24,6 +24,8 @@ export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent }: Props
   const [mode, setMode] = useState<Mode>(hasAgent && !agentBlocked ? 'prompt' : 'submit');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // For sudo/password prompts: hide what is typed and keep it out of keyboard suggestions.
+  const [hidden, setHidden] = useState(false);
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];
 
   const send = async (req: { method: string; params: Record<string, unknown> }, clear: boolean) => {
@@ -73,12 +75,21 @@ export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent }: Props
         >
           <Text style={[styles.muted, { color: mode === 'prompt' ? colors.accent : colors.muted }]}>{modeLabel[mode]}</Text>
         </Pressable>
+        <Pressable
+          testID="input-hidden"
+          accessibilityLabel={hidden ? 'Show typed text' : 'Hide typed text'}
+          onPress={() => setHidden((h) => !h)}
+          style={[bar.mode, hidden ? { backgroundColor: colors.accent } : null]}
+        >
+          <Text style={{ color: hidden ? '#fff' : colors.muted }}>{hidden ? '●●' : 'Aa'}</Text>
+        </Pressable>
         <TextInput
           testID="input-text"
+          secureTextEntry={hidden}
           style={[styles.input, { flex: 1, paddingVertical: 8, fontFamily: 'monospace', fontSize: 14 }]}
           value={text}
           onChangeText={setText}
-          placeholder={mode === 'prompt' ? 'Prompt the agent…' : 'Type a command…'}
+          placeholder={hidden ? 'Hidden input (e.g. password)…' : mode === 'prompt' ? 'Prompt the agent…' : 'Type a command…'}
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}

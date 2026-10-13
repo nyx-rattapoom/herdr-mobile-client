@@ -1,6 +1,7 @@
 package expo.modules.herdrssh
 
 import android.util.Base64
+import android.view.WindowManager
 import com.jcraft.jsch.ChannelDirectStreamLocal
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
@@ -178,6 +179,16 @@ class HerdrSshModule : Module() {
 
     Function("startMonitoring") { text: String ->
       appContext.reactContext?.let { MonitorService.start(it, text) }
+    }
+
+    // FLAG_SECURE: keeps app content out of screenshots, screen recording and the recents preview.
+    Function("setSecureScreen") { on: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function null
+      activity.runOnUiThread {
+        if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+      null
     }
 
     Function("stopMonitoring") {

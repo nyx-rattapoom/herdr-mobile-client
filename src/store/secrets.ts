@@ -110,15 +110,15 @@ export class SecretsUnavailable extends Error {
   }
 }
 
-export type Settings = { biometric: boolean };
+export type Settings = { biometric: boolean; secureScreen: boolean };
 const SETTINGS_KEY = 'settings.v1';
 
 export async function loadSettings(kv: KeyValueStore): Promise<Settings> {
   try {
     const v = JSON.parse((await kv.getItem(SETTINGS_KEY)) ?? '{}');
-    return { biometric: v.biometric === true };
+    return { biometric: v.biometric === true, secureScreen: v.secureScreen === true };
   } catch {
-    return { biometric: false };
+    return { biometric: false, secureScreen: false };
   }
 }
 

@@ -1,3 +1,4 @@
+import { cleanLabel } from '../live/text';
 import type { HerdrClient } from './client';
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
@@ -50,6 +51,8 @@ export type WorkspaceNode = WorkspaceRecord & { tabs: TabNode[] };
 export const MAX_RECORDS = 1000;
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+/** Display text from the server: sanitised and length-limited. */
+const label = (v: unknown, max = 80) => cleanLabel(v, max);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
 
@@ -72,7 +75,7 @@ function records<T>(v: unknown, ids: string[], pick: (o: Record<string, unknown>
 const pickWorkspace = (r: Record<string, unknown>): WorkspaceRecord => ({
   workspace_id: r.workspace_id as string,
   number: num(r.number),
-  label: str(r.label),
+  label: label(r.label),
   focused: bool(r.focused),
   agent_status: str(r.agent_status),
 });
@@ -80,7 +83,7 @@ const pickTab = (r: Record<string, unknown>): TabRecord => ({
   tab_id: r.tab_id as string,
   workspace_id: r.workspace_id as string,
   number: num(r.number),
-  label: str(r.label),
+  label: label(r.label),
   focused: bool(r.focused),
   agent_status: str(r.agent_status),
 });
@@ -89,15 +92,15 @@ const pickPane = (r: Record<string, unknown>): PaneRecord => ({
   tab_id: r.tab_id as string,
   workspace_id: r.workspace_id as string,
   focused: bool(r.focused),
-  cwd: str(r.cwd),
-  agent: str(r.agent),
+  cwd: label(r.cwd, 200),
+  agent: label(r.agent, 40),
   agent_status: str(r.agent_status),
-  terminal_title_stripped: str(r.terminal_title_stripped),
-  label: str(r.label),
+  terminal_title_stripped: label(r.terminal_title_stripped, 120),
+  label: label(r.label),
 });
 const pickAgent = (r: Record<string, unknown>): AgentRecord => ({
   pane_id: r.pane_id as string,
-  agent: str(r.agent),
+  agent: label(r.agent, 40),
   agent_status: str(r.agent_status),
 });
 

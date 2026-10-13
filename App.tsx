@@ -350,6 +350,8 @@ export default function App() {
           publicKey={account.publicKey}
           biometric={account.settings.biometric}
           biometricAvailable={account.biometricAvailable}
+          secureScreen={account.settings.secureScreen}
+          onToggleSecureScreen={(on) => void settingsAction(() => account.setSecureScreen(on))}
           error={settingsMsg.error}
           notice={settingsMsg.notice}
           onBack={home}

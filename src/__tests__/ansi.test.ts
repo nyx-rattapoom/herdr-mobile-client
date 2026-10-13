@@ -39,3 +39,10 @@ describe('parseAnsi', () => {
     expect(color256(196)).toBe('#ff0000');
   });
 });
+
+describe('unsafe characters (review L8)', () => {
+  it('drops C1 controls and bidi overrides/isolates from terminal text', () => {
+    const [line] = parseAnsi('safe‮txt.exe⁦x⁩\u0085\u009b31m!');
+    expect(lineText(line)).toBe('safetxt.exex31m!');
+  });
+});
