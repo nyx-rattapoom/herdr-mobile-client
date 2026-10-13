@@ -70,7 +70,13 @@ class PasswordUserInfo(private val password: String) : UserInfo, com.jcraft.jsch
     destination: String?, name: String?, instruction: String?, prompt: Array<out String>?, echo: BooleanArray?,
   ): Array<String>? {
     val p = prompt ?: return null
-    if (p.size != 1 || echo?.getOrNull(0) == true || interactivePrompts++ > 0) return null
+    // Only a single hidden prompt that asks for the password, and only once: never feed the
+    // password into a 2FA/OTP prompt or retry it.
+    if (p.size != 1 || echo?.getOrNull(0) == true || !isPasswordPrompt(p[0]) || interactivePrompts++ > 0) return null
     return arrayOf(password)
+  }
+
+  companion object {
+    fun isPasswordPrompt(prompt: String?): Boolean = prompt?.contains("password", ignoreCase = true) == true
   }
 }

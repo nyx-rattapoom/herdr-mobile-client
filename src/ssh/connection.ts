@@ -73,7 +73,8 @@ export class ServerConnection {
 
   /** Runs the official Herdr installer on the server (user-confirmed). */
   async installHerdr(): Promise<InstallOutcome & { log: string }> {
-    const res = await HerdrSsh.exec(this.sessionId, installCommand());
+    // Download + checksum + install; allow more than the default 120 s on slow links.
+    const res = await HerdrSsh.exec(this.sessionId, installCommand(), 300_000);
     return { ...explainInstall(res.exitCode, res.stdout, res.stderr), log: `${res.stdout}${res.stderr}` };
   }
 

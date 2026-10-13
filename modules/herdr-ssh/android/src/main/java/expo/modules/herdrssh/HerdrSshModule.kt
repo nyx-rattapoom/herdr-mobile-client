@@ -2,7 +2,6 @@ package expo.modules.herdrssh
 
 import android.util.Base64
 import com.jcraft.jsch.ChannelDirectStreamLocal
-import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
 import com.jcraft.jsch.JSchException
@@ -13,7 +12,6 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.util.UUID
@@ -22,7 +20,7 @@ import java.util.concurrent.Executors
 
 private const val CONNECT_TIMEOUT_MS = 15_000
 private const val CHANNEL_TIMEOUT_MS = 10_000
-private const val EXEC_OUTPUT_LIMIT = 1 shl 20
+private const val DEFAULT_EXEC_TIMEOUT_MS = 120_000
 
 // SSH_MSG_CHANNEL_OPEN_FAILURE reason codes (RFC 4254 §5.1).
 private const val OPEN_ADMINISTRATIVELY_PROHIBITED = 1
@@ -109,22 +107,10 @@ class HerdrSshModule : Module() {
       }
     }
 
-    AsyncFunction("exec") { sessionId: String, command: String, promise: Promise ->
+    // Runs a command with a hard deadline (see Exec.run).
+    AsyncFunction("exec") { sessionId: String, command: String, timeoutMs: Int?, promise: Promise ->
       run(promise) {
-        val session = requireSession(sessionId)
-        val channel = session.openChannel("exec") as ChannelExec
-        channel.setCommand(command)
-        val stdout = channel.inputStream
-        val stderr = channel.errStream
-        channel.connect(CHANNEL_TIMEOUT_MS)
-        // Drain stderr concurrently so a chatty command can't stall stdout on window space.
-        val errFuture = io.submit<String> { readLimited(stderr) }
-        val out = readLimited(stdout)
-        val err = errFuture.get()
-        while (!channel.isClosed) Thread.sleep(20)
-        val status = channel.exitStatus
-        channel.disconnect()
-        mapOf("stdout" to out, "stderr" to err, "exitCode" to status)
+        Exec.run(requireSession(sessionId), command, (timeoutMs ?: DEFAULT_EXEC_TIMEOUT_MS).toLong(), io)
       }
     }
 
@@ -137,6 +123,7 @@ class HerdrSshModule : Module() {
         try {
           channel.connect(CHANNEL_TIMEOUT_MS)
         } catch (e: JSchException) {
+          channel.disconnect()
           throw when (channel.exitStatus) {
             OPEN_ADMINISTRATIVELY_PROHIBITED -> SshError(
               "ERR_FORWARDING_PROHIBITED",
@@ -258,17 +245,7 @@ class HerdrSshModule : Module() {
     }
   }
 
-  private fun readLimited(stream: java.io.InputStream): String {
-    val out = ByteArrayOutputStream()
-    val buf = ByteArray(8192)
-    while (true) {
-      val n = stream.read(buf)
-      if (n < 0) break
-      if (out.size() + n > EXEC_OUTPUT_LIMIT) throw SshError("ERR_EXEC", "command output too large")
-      out.write(buf, 0, n)
-    }
-    return out.toString("UTF-8")
-  }
+
 
   private fun decodeKey(b64: String): ByteArray =
     try {

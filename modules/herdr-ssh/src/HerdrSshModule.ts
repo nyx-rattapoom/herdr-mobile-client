@@ -12,7 +12,8 @@ declare class HerdrSshModule extends NativeModule<HerdrSshEvents> {
   connect(host: string, port: number, username: string, auth: SshAuth, pinnedKey: string): Promise<string>;
   /** Generates an Ed25519 key pair on the device. */
   generateEd25519(comment: string): Promise<GeneratedKey>;
-  exec(sessionId: string, command: string): Promise<ExecResult>;
+  /** Runs a command; rejects with ERR_TIMEOUT after `timeoutMs` (default 120 s, max 600 s). */
+  exec(sessionId: string, command: string, timeoutMs?: number): Promise<ExecResult>;
   /** Opens a direct-streamlocal channel to a Unix socket on the server. Resolves to a channel id. */
   openSocket(sessionId: string, socketPath: string): Promise<string>;
   write(channelId: string, data: string): Promise<void>;

@@ -115,4 +115,32 @@ class StreamLocalIntegrationTest {
       admin.disconnect()
     }
   }
+
+  @Test
+  fun execTimesOutAndClosesTheChannel() {
+    val (user, pw, host, port) = parts()
+    val s = session(user, host, port, PinnedHostKeyRepository(probe(user, host, port))).apply {
+      setPassword(pw)
+      setConfig("PreferredAuthentications", "password")
+      connect(10_000)
+    }
+    val io = java.util.concurrent.Executors.newCachedThreadPool()
+    try {
+      val ok = Exec.run(s, "echo hi; echo err >&2; exit 3", 10_000, io)
+      assertTrue(ok.toString(), ok["stdout"] == "hi\n" && ok["stderr"] == "err\n" && ok["exitCode"] == 3)
+      val t0 = System.currentTimeMillis()
+      try {
+        Exec.run(s, "sleep 30", 1_500, io)
+        throw AssertionError("expected timeout")
+      } catch (e: SshError) {
+        assertTrue(e.message, e.code == "ERR_TIMEOUT")
+      }
+      assertTrue("took too long", System.currentTimeMillis() - t0 < 5_000)
+      // The session is still usable afterwards.
+      assertTrue(Exec.run(s, "echo again", 10_000, io)["stdout"] == "again\n")
+    } finally {
+      io.shutdownNow()
+      s.disconnect()
+    }
+  }
 }
