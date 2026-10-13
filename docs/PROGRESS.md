@@ -62,3 +62,44 @@ Open:
   agent prompt is untested here. It needs a real agent CLI on the test server.
 - Fixture bug, reported to the test-infra owner: fake-agent restarts `--seq` at 1 on every run, and Herdr ignores
   reports whose seq isn't above the last one for the same source. So only the first run in a pane changes status.
+
+## M4: agent status and notifications (2026-10-13)
+
+- Agent status comes from `pane.agent_status_changed` subscriptions (applied right away) and from
+  `session.snapshot` agents (authoritative). It shows next to panes, tabs and workspaces in the tree.
+- Alert rules (`src/live/agents.ts`): **blocked** when an agent enters `blocked`; **completed** when a `working`
+  agent becomes `idle`/`done` or disappears from the agent list (Herdr drops idle agents). The first snapshot
+  after starting a session is a silent baseline, so agents that were already blocked at connect don't re-alert,
+  but transitions missed during a reconnect do. Repeats per pane+kind are deduped for 15 s (`AlertDeduper`).
+- Notifications use expo-notifications on a dedicated `agents` channel (high importance). There's no alert while
+  the user is looking at that pane. Tapping a notification opens the pane, and also connects first if the app was on
+  the server list.
+- Background: while connected, a foreground service (`MonitorService`, type `dataSync`, ongoing "Watching agents
+  on <server>" notification) keeps the process, the JS runtime and the SSH sockets alive. SSH keepalives (15 s × 3)
+  detect dead links, and LiveSession reconnects.
+
+Emulator evidence (screenshots `m4-*`, cropped to this app's notifications):
+1. With the app backgrounded (HOME), fake-agent in w2:p2 posts "fake needs your input · Blocked in test box · api · w2:p2" on
+   channel `agents`, next to the ongoing monitor notification (`m4-02`).
+2. Tapping it opens w2:p2 at the `[y/n]` prompt (`m4-03`). Answering y and going HOME posts "fake finished ·
+   Completed in …" (`m4-04`).
+3. In the tree, w2:p2 shows `fake ● working`, then `● blocked` (`m4-05`, `m4-06`).
+4. Answering while viewing w2:p2 posts no new "finished" notification.
+5. Screen off + `dumpsys battery unplug` + `dumpsys deviceidle force-idle` (deep IDLE): the blocked alert
+   still arrives within the 12 s window, and the service stays `isForeground=true`.
+
+### Background limits (Android)
+- Alerts need the process alive. If the user swipes the app away from recents, force-stops it, or the OS kills it
+  under memory pressure, the service stops (`START_NOT_STICKY`) and no alerts arrive until the app is opened again.
+  There is no push path without a server-side component (paired-device mode, M6, is future work).
+- Some OEM battery managers kill foreground services regardless; users may need to exempt the app.
+- Android 13+ asks for notification permission once. If it's denied, status is still shown in-app but nothing is posted.
+- Android 14+ requires a foreground-service type. `dataSync` is time-limited on Android 15+ (about 6 h per 24 h). When
+  the system times it out, the service stops itself and background alerts pause until the app is foregrounded.
+- Doze: verified on Android 11 that a foreground-service process keeps its connection in forced deep idle. Newer
+  versions and OEM builds weren't tested.
+- Network changes (Wi-Fi ↔ cellular) drop the SSH session. Keepalives notice within about 45 s and the UI shows
+  *offline* with Reconnect. Automatic SSH re-dial in the background is not implemented.
+
+Known gap: a successful `agent.prompt` isn't exercised end to end. It needs a Herdr-detected agent CLI, and the test
+server has none (no API keys). It's covered by unit tests (`inputRequest`) and the error-path evidence in M3.
