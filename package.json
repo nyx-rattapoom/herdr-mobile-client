@@ -31,8 +31,8 @@
     "preset": "jest-expo",
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/.work/",
-      "/android/"
+      "<rootDir>/.work/",
+      "<rootDir>/android/"
     ]
   }
 }
