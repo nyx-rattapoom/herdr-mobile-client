@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, BackHandler } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
-import { fetchSnapshot, buildTree } from './src/protocol/snapshot';
+import { LiveSession } from './src/live/LiveSession';
+import type { PaneNode } from './src/protocol/snapshot';
 import { AddServerScreen } from './src/screens/AddServerScreen';
 import { HostKeyScreen } from './src/screens/HostKeyScreen';
-import { SessionsScreen, type SessionView } from './src/screens/SessionsScreen';
+import { PaneScreen } from './src/screens/PaneScreen';
+import { SessionsScreen, type SessionEntry } from './src/screens/SessionsScreen';
 import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, colors } from './src/screens/ui';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
@@ -25,7 +27,8 @@ type Route =
   | { name: 'add' }
   | { name: 'busy'; label: string }
   | { name: 'hostkey'; server: ServerProfile; decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }> }
-  | { name: 'sessions'; server: ServerProfile; views: SessionView[]; herdrFound: boolean };
+  | { name: 'sessions'; server: ServerProfile; entries: SessionEntry[]; herdrFound: boolean }
+  | { name: 'pane'; parent: Extract<Route, { name: 'sessions' }>; live: LiveSession; pane: PaneNode };
 
 export default function App() {
   const servers = useMemo(() => new ServerStore(secureKv), []);
@@ -33,8 +36,8 @@ export default function App() {
   const [list, setList] = useState<ServerProfile[]>([]);
   const [route, setRoute] = useState<Route>({ name: 'servers' });
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const conn = useRef<ServerConnection | null>(null);
+  const lives = useRef<LiveSession[]>([]);
 
   const reload = useCallback(() => servers.list().then(setList), [servers]);
   useEffect(() => {
@@ -42,6 +45,8 @@ export default function App() {
   }, [reload]);
 
   const home = useCallback(() => {
+    lives.current.forEach((l) => l.stop());
+    lives.current = [];
     conn.current?.close();
     conn.current = null;
     setRoute({ name: 'servers' });
@@ -50,31 +55,25 @@ export default function App() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (route.name === 'servers') return false;
-      home();
+      if (route.name === 'pane') setRoute(route.parent);
+      else home();
       return true;
     });
     return () => sub.remove();
-  }, [route.name, home]);
+  }, [route, home]);
 
   const loadSessions = useCallback(async (server: ServerProfile, c: ServerConnection) => {
     const discovery = await c.discoverSessions();
-    const views = await Promise.all(
-      discovery.sessions.map(async (session): Promise<SessionView> => {
-        if (!session.running) return { session };
-        try {
-          const client = await c.openHerdr(session.socketPath);
-          try {
-            const snap = await fetchSnapshot(client);
-            return { session, tree: buildTree(snap), version: snap.version };
-          } finally {
-            client.close();
-          }
-        } catch (e) {
-          return { session, error: describeSshError(e) };
-        }
-      }),
-    );
-    setRoute({ name: 'sessions', server, views, herdrFound: discovery.herdrFound });
+    lives.current.forEach((l) => l.stop());
+    lives.current = [];
+    const entries: SessionEntry[] = discovery.sessions.map((session) => {
+      if (!session.running) return { session };
+      const live = new LiveSession(() => c.openHerdr(session.socketPath));
+      lives.current.push(live);
+      void live.start();
+      return { session, live };
+    });
+    setRoute({ name: 'sessions', server, entries, herdrFound: discovery.herdrFound });
   }, []);
 
   const connectPinned = useCallback(
@@ -125,18 +124,6 @@ export default function App() {
     },
     [pins, connectPinned, fail],
   );
-
-  const refresh = useCallback(async () => {
-    if (route.name !== 'sessions' || !conn.current) return;
-    setRefreshing(true);
-    try {
-      await loadSessions(route.server, conn.current);
-    } catch (e) {
-      fail(e);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [route, loadSessions, fail]);
 
   const manage = useCallback(
     (server: ServerProfile) => {
@@ -196,11 +183,28 @@ export default function App() {
       screen = (
         <SessionsScreen
           title={route.server.label}
-          views={route.views}
+          entries={route.entries}
           herdrFound={route.herdrFound}
-          refreshing={refreshing}
-          onRefresh={refresh}
+          onOpenPane={(session, pane) => {
+            const live = route.entries.find((e) => e.session.name === session)?.live;
+            if (live) setRoute({ name: 'pane', parent: route, live, pane });
+          }}
           onBack={home}
+          onReconnect={() => {
+            const server = route.server;
+            home();
+            void open(server);
+          }}
+        />
+      );
+      break;
+    case 'pane':
+      screen = (
+        <PaneScreen
+          live={route.live}
+          paneId={route.pane.pane_id}
+          title={`${route.pane.pane_id} ${route.pane.terminal_title_stripped ?? ''}`.trim()}
+          onBack={() => setRoute(route.parent)}
         />
       );
       break;
