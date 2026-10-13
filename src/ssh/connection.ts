@@ -41,7 +41,7 @@ class SshSocketTransport implements Transport {
   }
 }
 
-export type ConnectParams = { host: string; port: number; username: string; password: string };
+export type ConnectParams = { host: string; port: number; username: string; password?: string; privateKey?: string };
 
 /** An authenticated SSH session to one server. */
 export class ServerConnection {
@@ -49,7 +49,7 @@ export class ServerConnection {
 
   /** The native side re-checks the pin during key exchange and fails before auth on mismatch. */
   static async open(p: ConnectParams, pin: HostKeyPin): Promise<ServerConnection> {
-    const id = await HerdrSsh.connect(p.host, p.port, p.username, p.password, pin.key);
+    const id = await HerdrSsh.connect(p.host, p.port, p.username, { password: p.password, privateKey: p.privateKey }, pin.key);
     return new ServerConnection(id);
   }
 

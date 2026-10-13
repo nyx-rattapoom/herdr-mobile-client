@@ -1,0 +1,77 @@
+package expo.modules.herdrssh
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+
+/**
+ * Foreground service with an ongoing "Monitoring agents" notification. While it runs, Android
+ * treats the app as foreground-important, so the JS runtime and SSH sockets keep running when
+ * the UI is in the background. It does no work itself.
+ */
+class MonitorService : Service() {
+  override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Watching agents"
+    val notification = build(this, text)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+    } else {
+      startForeground(NOTIFICATION_ID, notification)
+    }
+    // If the process is killed, don't resurrect a service with no connections behind it.
+    return START_NOT_STICKY
+  }
+
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    // Android 15+ limits dataSync services (about 6 h a day); stop cleanly when told to.
+    stopSelf()
+  }
+
+  companion object {
+    private const val CHANNEL_ID = "herdr-monitor"
+    private const val NOTIFICATION_ID = 4711
+    private const val EXTRA_TEXT = "text"
+
+    fun start(context: Context, text: String) {
+      val i = Intent(context, MonitorService::class.java).putExtra(EXTRA_TEXT, text)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
+    }
+
+    fun stop(context: Context) {
+      context.stopService(Intent(context, MonitorService::class.java))
+    }
+
+    private fun build(context: Context, text: String): Notification {
+      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        nm.createNotificationChannel(
+          NotificationChannel(CHANNEL_ID, "Agent monitoring", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Shown while the app keeps server connections open in the background"
+            setShowBadge(false)
+          },
+        )
+      }
+      val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+      val pi = launch?.let {
+        PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+      }
+      val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(context, CHANNEL_ID)
+      else @Suppress("DEPRECATION") Notification.Builder(context)
+      return b.setContentTitle("Herdr Client")
+        .setContentText(text)
+        .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        .setOngoing(true)
+        .setContentIntent(pi)
+        .build()
+    }
+  }
+}

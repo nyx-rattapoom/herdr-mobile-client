@@ -7,6 +7,15 @@ export type HostKeyInfo = {
   fingerprint: string;
 };
 
+export type SshAuth = { password?: string; privateKey?: string };
+
+export type GeneratedKey = {
+  /** OpenSSH v1 private key (unencrypted PEM). Store only in Keystore-backed storage. */
+  privateKey: string;
+  /** `ssh-ed25519 AAAA… comment`, ready for authorized_keys. */
+  publicKey: string;
+};
+
 export type ExecResult = { stdout: string; stderr: string; exitCode: number };
 
 export type HerdrSshEvents = {

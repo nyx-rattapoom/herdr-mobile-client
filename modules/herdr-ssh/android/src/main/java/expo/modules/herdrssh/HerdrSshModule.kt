@@ -7,6 +7,7 @@ import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
 import com.jcraft.jsch.JSchException
 import com.jcraft.jsch.JSchUnknownHostKeyException
+import com.jcraft.jsch.KeyPair
 import com.jcraft.jsch.Session
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
@@ -63,16 +64,39 @@ class HerdrSshModule : Module() {
       }
     }
 
-    // Connects only if the server presents exactly the pinned key; the password is used
-    // after the key check passes.
-    AsyncFunction("connect") { host: String, port: Int, username: String, password: String, pinnedKey: String, promise: Promise ->
+    // Generates an Ed25519 key pair on the device. The private key is returned in OpenSSH
+    // format for the app to keep in Keystore-backed storage; it never leaves the device.
+    AsyncFunction("generateEd25519") { comment: String, promise: Promise ->
+      run(promise) { Keys.generateEd25519(comment) }
+    }
+
+    // Connects only if the server presents exactly the pinned key. Credentials are configured
+    // here but JSch uses them only after the host key check passes. With both a key and a
+    // password, public-key auth is tried first and the password is the fallback.
+    AsyncFunction("connect") { host: String, port: Int, username: String, auth: Map<String, Any?>, pinnedKey: String, promise: Promise ->
       run(promise) {
         val pinned = decodeKey(pinnedKey)
+        val password = (auth["password"] as? String)?.takeIf { it.isNotEmpty() }
+        val privateKey = (auth["privateKey"] as? String)?.takeIf { it.isNotEmpty() }
+        if (password == null && privateKey == null) throw SshError("ERR_ARGS", "no credentials")
         val repo = PinnedHostKeyRepository(pinned)
-        val session = newSession(host, port, username, repo)
-        session.setConfig("PreferredAuthentications", "password,keyboard-interactive")
-        session.userInfo = PasswordUserInfo(password)
-        session.setPassword(password)
+        val jsch = JSch()
+        if (privateKey != null) {
+          try {
+            jsch.addIdentity("herdr-client", privateKey.toByteArray(Charsets.UTF_8), null, null)
+          } catch (e: JSchException) {
+            throw SshError("ERR_ARGS", "stored private key is unreadable", e)
+          }
+        }
+        val session = newSession(jsch, host, port, username, repo)
+        session.setConfig(
+          "PreferredAuthentications",
+          listOfNotNull(privateKey?.let { "publickey" }, password?.let { "password,keyboard-interactive" }).joinToString(","),
+        )
+        if (password != null) {
+          session.userInfo = PasswordUserInfo(password)
+          session.setPassword(password)
+        }
         try {
           session.connect(CONNECT_TIMEOUT_MS)
         } catch (e: JSchException) {
@@ -165,7 +189,16 @@ class HerdrSshModule : Module() {
       sessions.remove(sessionId)?.disconnect()
     }
 
+    Function("startMonitoring") { text: String ->
+      appContext.reactContext?.let { MonitorService.start(it, text) }
+    }
+
+    Function("stopMonitoring") {
+      appContext.reactContext?.let { MonitorService.stop(it) }
+    }
+
     OnDestroy {
+      appContext.reactContext?.let { MonitorService.stop(it) }
       channels.values.forEach { it.channel.disconnect() }
       sessions.values.forEach { it.disconnect() }
       io.shutdownNow()
@@ -184,12 +217,17 @@ class HerdrSshModule : Module() {
     }
   }
 
-  private fun newSession(host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session {
-    val jsch = JSch()
+  private fun newSession(host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session =
+    newSession(JSch(), host, port, user, repo)
+
+  private fun newSession(jsch: JSch, host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session {
     jsch.hostKeyRepository = repo
     val session = jsch.getSession(user, host, port)
     session.setConfig("StrictHostKeyChecking", "yes")
     session.setConfig("HashKnownHosts", "no")
+    // Detect dead links (e.g. after network changes) instead of hanging on a silent socket.
+    session.setServerAliveInterval(15_000)
+    session.setServerAliveCountMax(3)
     return session
   }
 
