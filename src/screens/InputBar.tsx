@@ -14,12 +14,14 @@ type Props = {
   agentBlocked?: boolean;
   /** Re-read output right after input so the echo shows up quickly. */
   onSent: () => void;
+  /** The pane has nothing on screen yet. */
+  paneBlank?: boolean;
 };
 
 type Mode = 'submit' | 'type' | 'prompt';
 const modeLabel: Record<Mode, string> = { submit: 'Line ⏎', type: 'Text only', prompt: 'Agent prompt' };
 
-export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent }: Props) {
+export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent, paneBlank }: Props) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<Mode>(hasAgent && !agentBlocked ? 'prompt' : 'submit');
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,11 @@ export function InputBar({ live, paneId, hasAgent, agentBlocked, onSent }: Props
       {error ? (
         <Text testID="input-error" style={[styles.muted, { color: colors.danger, marginBottom: 6 }]}>
           {error}
+        </Text>
+      ) : mode === 'prompt' && paneBlank ? (
+        // Herdr can report an agent as idle before its UI is drawn; a prompt sent then is lost.
+        <Text testID="input-not-ready" style={[styles.muted, { marginBottom: 6 }]}>
+          The agent hasn&apos;t drawn anything yet. A prompt sent now may be lost; wait for its screen to appear.
         </Text>
       ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always">

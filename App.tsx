@@ -436,13 +436,14 @@ export default function App() {
           paneId={route.pane.pane_id}
           title={`${route.pane.pane_id} ${route.pane.terminal_title_stripped ?? ''}`.trim()}
           onBack={() => setRoute(route.parent)}
-          footer={(pokeNow) => (
+          footer={(pokeNow, blank) => (
             <InputBar
               live={route.live}
               paneId={route.pane.pane_id}
               hasAgent={Boolean(route.live.getState().agents.get(route.pane.pane_id)?.agent ?? route.pane.agent)}
               agentBlocked={route.live.getState().agents.get(route.pane.pane_id)?.status === 'blocked'}
               onSent={pokeNow}
+              paneBlank={blank}
             />
           )}
         />
