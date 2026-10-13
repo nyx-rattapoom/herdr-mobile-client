@@ -1,4 +1,4 @@
-import { HerdrApiError, HerdrClient } from '../protocol/client';
+import { HerdrApiError, HerdrClient, MAX_LINE_CHARS } from '../protocol/client';
 import { LineBuffer } from '../protocol/transport';
 import { FakeTransport } from '../testing/fakes';
 
@@ -97,5 +97,38 @@ describe('HerdrClient', () => {
     c.close();
     expect(t.closed).toBe(true);
     await expect(p).rejects.toMatchObject({ code: 'closed' });
+  });
+});
+
+describe('bounded buffering (review M1)', () => {
+  it('LineBuffer does not re-split pending text for chunks without a newline', () => {
+    const b = new LineBuffer();
+    const split = jest.spyOn(String.prototype, 'split');
+    for (let i = 0; i < 1000; i++) b.push('x'.repeat(100));
+    expect(split).not.toHaveBeenCalled();
+    split.mockRestore();
+    expect(b.push('\n')).toEqual(['x'.repeat(100_000)]);
+  });
+
+  it('closes the connection when a line without newline exceeds the cap', async () => {
+    const t = new FakeTransport();
+    const c = new HerdrClient(t);
+    const p = c.request('ping');
+    await flush();
+    const chunk = 'y'.repeat(64 * 1024);
+    for (let sent = 0; sent <= MAX_LINE_CHARS && !t.closed; sent += chunk.length) t.push(chunk);
+    expect(t.closed).toBe(true);
+    await expect(p).rejects.toMatchObject({ code: 'protocol' });
+    t.push('{"id":"req_1","result":{}}\n'); // ignored after close
+  });
+
+  it('closes the connection when a complete line exceeds the cap', async () => {
+    const t = new FakeTransport();
+    const c = new HerdrClient(t);
+    const p = c.request('ping');
+    await flush();
+    t.push('z'.repeat(MAX_LINE_CHARS + 1) + '\n');
+    expect(t.closed).toBe(true);
+    await expect(p).rejects.toMatchObject({ code: 'protocol' });
   });
 });

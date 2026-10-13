@@ -46,9 +46,60 @@ export type PaneNode = PaneRecord & { agent?: string };
 export type TabNode = TabRecord & { panes: PaneNode[] };
 export type WorkspaceNode = WorkspaceRecord & { tabs: TabNode[] };
 
-function list<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
+/** Per-kind cap on snapshot records; a real session is far smaller. */
+export const MAX_RECORDS = 1000;
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+
+/**
+ * Keeps at most MAX_RECORDS objects whose id fields are strings, and copies only the known fields
+ * with the expected types, so nothing unexpected reaches the UI.
+ */
+function records<T>(v: unknown, ids: string[], pick: (o: Record<string, unknown>) => T): T[] {
+  if (!Array.isArray(v)) return [];
+  const out: T[] = [];
+  for (const o of v) {
+    if (out.length >= MAX_RECORDS) break;
+    if (!o || typeof o !== 'object') continue;
+    const r = o as Record<string, unknown>;
+    if (ids.every((k) => typeof r[k] === 'string')) out.push(pick(r));
+  }
+  return out;
 }
+
+const pickWorkspace = (r: Record<string, unknown>): WorkspaceRecord => ({
+  workspace_id: r.workspace_id as string,
+  number: num(r.number),
+  label: str(r.label),
+  focused: bool(r.focused),
+  agent_status: str(r.agent_status),
+});
+const pickTab = (r: Record<string, unknown>): TabRecord => ({
+  tab_id: r.tab_id as string,
+  workspace_id: r.workspace_id as string,
+  number: num(r.number),
+  label: str(r.label),
+  focused: bool(r.focused),
+  agent_status: str(r.agent_status),
+});
+const pickPane = (r: Record<string, unknown>): PaneRecord => ({
+  pane_id: r.pane_id as string,
+  tab_id: r.tab_id as string,
+  workspace_id: r.workspace_id as string,
+  focused: bool(r.focused),
+  cwd: str(r.cwd),
+  agent: str(r.agent),
+  agent_status: str(r.agent_status),
+  terminal_title_stripped: str(r.terminal_title_stripped),
+  label: str(r.label),
+});
+const pickAgent = (r: Record<string, unknown>): AgentRecord => ({
+  pane_id: r.pane_id as string,
+  agent: str(r.agent),
+  agent_status: str(r.agent_status),
+});
 
 export async function fetchSnapshot(client: HerdrClient): Promise<SessionSnapshot> {
   const res = await client.request<{ type?: string; snapshot?: Record<string, unknown> }>('session.snapshot');
@@ -59,10 +110,10 @@ export async function fetchSnapshot(client: HerdrClient): Promise<SessionSnapsho
   return {
     version: typeof s.version === 'string' ? s.version : undefined,
     protocol: typeof s.protocol === 'number' ? s.protocol : undefined,
-    workspaces: list(s.workspaces),
-    tabs: list(s.tabs),
-    panes: list(s.panes),
-    agents: list(s.agents),
+    workspaces: records(s.workspaces, ['workspace_id'], pickWorkspace),
+    tabs: records(s.tabs, ['tab_id', 'workspace_id'], pickTab),
+    panes: records(s.panes, ['pane_id', 'tab_id', 'workspace_id'], pickPane),
+    agents: records(s.agents, ['pane_id'], pickAgent),
   };
 }
 

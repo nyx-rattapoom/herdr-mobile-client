@@ -1,5 +1,5 @@
 import { HerdrClient } from '../protocol/client';
-import { buildTree, fetchSnapshot } from '../protocol/snapshot';
+import { MAX_RECORDS, buildTree, fetchSnapshot } from '../protocol/snapshot';
 import { FakeTransport } from '../testing/fakes';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -57,5 +57,32 @@ describe('session snapshot', () => {
     expect(api.tabs[1].panes[0].terminal_title_stripped).toBe('tail -f');
     // Tab w9:t1 has no workspace and is dropped.
     expect(tree.flatMap((w) => w.tabs).some((t) => t.tab_id === 'w9:t1')).toBe(false);
+  });
+});
+
+describe('snapshot hardening (review M1/L8)', () => {
+  it('caps record counts and drops records with non-string ids or fields', async () => {
+    const t = new FakeTransport();
+    const p = fetchSnapshot(new HerdrClient(t));
+    await flush();
+    const panes = Array.from({ length: MAX_RECORDS + 50 }, (_, i) => ({ pane_id: `w1:p${i}`, tab_id: 'w1:t1', workspace_id: 'w1' }));
+    t.push(
+      JSON.stringify({
+        id: 'req_1',
+        result: {
+          snapshot: {
+            workspaces: [{ workspace_id: 'w1', label: { evil: true }, number: 'NaN' }, { workspace_id: 7 }],
+            tabs: [{ tab_id: 'w1:t1', workspace_id: 'w1', label: ['x'] }],
+            panes,
+            agents: [{ pane_id: 'w1:p0', agent: 42, agent_status: 'working' }],
+          },
+        },
+      }) + '\n',
+    );
+    const s = await p;
+    expect(s.panes).toHaveLength(MAX_RECORDS);
+    expect(s.workspaces).toEqual([{ workspace_id: 'w1', number: undefined, label: undefined, focused: undefined, agent_status: undefined }]);
+    expect(s.tabs[0].label).toBeUndefined();
+    expect(s.agents[0]).toEqual({ pane_id: 'w1:p0', agent: undefined, agent_status: 'working' });
   });
 });

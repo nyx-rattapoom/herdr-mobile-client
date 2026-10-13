@@ -7,18 +7,28 @@ export interface Transport {
   close(): void;
 }
 
-/** Splits a stream of text chunks into complete newline-terminated lines. */
+/**
+ * Splits a stream of text chunks into complete newline-terminated lines. Linear in input size:
+ * chunks without a newline are only appended, and only the newly completed text is split.
+ */
 export class LineBuffer {
   private pending = '';
 
   push(chunk: string): string[] {
-    this.pending += chunk;
-    const parts = this.pending.split('\n');
-    this.pending = parts.pop() ?? '';
-    return parts.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l)).filter((l) => l.length > 0);
+    const nl = chunk.lastIndexOf('\n');
+    if (nl < 0) {
+      this.pending += chunk;
+      return [];
+    }
+    const complete = this.pending + chunk.slice(0, nl);
+    this.pending = chunk.slice(nl + 1);
+    return complete
+      .split('\n')
+      .map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
+      .filter((l) => l.length > 0);
   }
 
-  /** Bytes received after the last newline. */
+  /** Text received after the last newline. */
   get remainder(): string {
     return this.pending;
   }

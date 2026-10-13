@@ -170,15 +170,15 @@ export class LiveSession {
   private handleEvent(client: HerdrClient, e: HerdrEvent): void {
     if (client !== this.sub) return;
     if (e.event === 'pane_agent_status_changed' || e.event === 'pane.agent_status_changed') {
-      const d = e.data as { pane_id?: string; agent_status?: string; agent?: string | null; workspace_id?: string };
-      if (d.pane_id && d.agent_status) {
+      const d = e.data as { pane_id?: unknown; agent_status?: unknown; agent?: unknown; workspace_id?: unknown };
+      if (typeof d.pane_id === 'string' && typeof d.agent_status === 'string') {
         const next = new Map(this.state.agents);
         const prev = next.get(d.pane_id);
         next.set(d.pane_id, {
           ...prev,
           status: d.agent_status,
-          agent: d.agent ?? prev?.agent,
-          workspaceId: d.workspace_id ?? prev?.workspaceId,
+          agent: typeof d.agent === 'string' ? d.agent : prev?.agent,
+          workspaceId: typeof d.workspace_id === 'string' ? d.workspace_id : prev?.workspaceId,
         });
         this.setAgents(next);
       }

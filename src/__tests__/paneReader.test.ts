@@ -1,4 +1,4 @@
-import { DEFAULT_LINES, MAX_LINES, PaneReader } from '../live/PaneReader';
+import { DEFAULT_LINES, MAX_LINES, MAX_TEXT_CHARS, PaneReader, capText } from '../live/PaneReader';
 
 describe('PaneReader', () => {
   beforeEach(() => jest.useFakeTimers());
@@ -57,5 +57,15 @@ describe('PaneReader', () => {
     jest.advanceTimersByTime(5000);
     await tick();
     expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('capText (review M1)', () => {
+  it('keeps the newest text, starting at a line boundary', () => {
+    expect(capText('short')).toEqual({ text: 'short', capped: false });
+    expect(capText('aaaa\nbbbb\ncccc', 7)).toEqual({ text: 'cccc', capped: true });
+    expect(capText('x'.repeat(20), 5)).toEqual({ text: 'xxxxx', capped: true });
+    const big = 'line\n'.repeat(MAX_TEXT_CHARS / 5 + 10);
+    expect(capText(big).text.length).toBeLessThanOrEqual(MAX_TEXT_CHARS);
   });
 });

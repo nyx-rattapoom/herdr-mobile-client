@@ -4,6 +4,16 @@ type Query = <T>(method: string, params: Record<string, unknown>) => Promise<T>;
 
 export const DEFAULT_LINES = 300;
 export const MAX_LINES = 10_000;
+/** Upper bound on text handed to the ANSI parser and renderer; the newest output is kept. */
+export const MAX_TEXT_CHARS = 1_000_000;
+
+/** Keeps the last `max` characters, starting at a line boundary when possible. */
+export function capText(text: string, max = MAX_TEXT_CHARS): { text: string; capped: boolean } {
+  if (text.length <= max) return { text, capped: false };
+  const tail = text.slice(text.length - max);
+  const nl = tail.indexOf('\n');
+  return { text: nl >= 0 && nl < tail.length - 1 ? tail.slice(nl + 1) : tail, capped: true };
+}
 
 /**
  * Polls `pane.read` (source `recent`, which includes scrollback) while a pane is on screen.
@@ -68,7 +78,9 @@ export class PaneReader {
         lines,
         format: 'ansi',
       });
-      const out: PaneOutput = { text: res?.read?.text ?? '', truncated: res?.read?.truncated === true, lines };
+      const raw = typeof res?.read?.text === 'string' ? res.read.text : '';
+      const { text, capped } = capText(raw);
+      const out: PaneOutput = { text, truncated: capped || res?.read?.truncated === true, lines };
       if (this.running && (!this.last || out.text !== this.last.text || out.lines !== this.last.lines)) {
         this.last = out;
         this.onOutput(out);

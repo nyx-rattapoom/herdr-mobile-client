@@ -1,7 +1,10 @@
 import { LineBuffer, type Transport } from './transport';
 
-/** Guards against an unbounded line if the peer never sends a newline. */
-const MAX_LINE_BYTES = 16 * 1024 * 1024;
+/**
+ * Largest accepted JSON line (UTF-16 code units). Snapshots and pane reads of normal sessions are
+ * far smaller; anything bigger is treated as a protocol violation rather than parsed on the JS thread.
+ */
+export const MAX_LINE_CHARS = 2 * 1024 * 1024;
 
 export class HerdrApiError extends Error {
   constructor(
@@ -92,11 +95,18 @@ export class HerdrClient {
   }
 
   private handleData(chunk: string): void {
-    for (const line of this.lines.push(chunk)) this.handleLine(line);
-    if (this.lines.remainder.length > MAX_LINE_BYTES) {
-      this.transport.close();
-      this.fail(new HerdrApiError('protocol', 'response line too long'));
+    if (this.closedReason !== null) return;
+    for (const line of this.lines.push(chunk)) {
+      if (line.length > MAX_LINE_CHARS) return this.overflow();
+      this.handleLine(line);
     }
+    if (this.lines.remainder.length > MAX_LINE_CHARS) this.overflow();
+  }
+
+  /** Closes the connection on an oversized line; the server is misbehaving or not Herdr. */
+  private overflow(): void {
+    this.transport.close();
+    this.fail(new HerdrApiError('protocol', `response line longer than ${MAX_LINE_CHARS} characters`));
   }
 
   private handleLine(line: string): void {
