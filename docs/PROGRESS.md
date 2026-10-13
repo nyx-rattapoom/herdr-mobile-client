@@ -34,3 +34,31 @@ events_lost backoff, offline), `paneReader.test.ts`, `ansi.test.ts`, `agents.tes
 
 Open: polling costs one `pane.read` per second per open pane, and only while the pane view is visible.
 Long lines wrap; there's no horizontal terminal emulation.
+
+## M3: input and tab/pane/workspace actions (2026-10-13)
+
+- Pane view input bar (`src/screens/InputBar.tsx`). There are three modes: **Line ⏎** (`pane.send_input` with the text plus
+  `enter` in one request), **Text only** (`pane.send_text`) and **Agent prompt** (`agent.prompt`, the default when the
+  pane has an agent). A special-key row sends Herdr key combos: Esc, ^C, ⏎, Tab, arrows, ⌫, ⇧Tab, ^D, ^Z, ^L, ^R.
+- Long-pressing a workspace, tab or pane opens an action sheet: focus, new tab, new workspace, split right/down,
+  close. The session card has a "+ Workspace" button. New tab/workspace asks for an optional name. Every close
+  first shows a confirmation that says what will be terminated (`confirmText`). Herdr errors are translated
+  (`describeActionError`).
+- The pane view and prompt dialog avoid the keyboard (edge-to-edge Android doesn't resize the window).
+
+Emulator evidence (screenshots `m3-*`):
+1. `echo m3-input-ok` was sent from the input bar and echoed in w1:p1. `sleep 100`, then ^C, interrupts it and returns to the prompt (`m3-02`).
+2. Tab action sheet (`m3-03`) → New tab "m3tab" (`m3-04`) appears in the tree. Split right on w1:p3 creates w1:p4.
+3. Close pane w1:p4 shows the confirm dialog "Close pane w1:p4? Its process will be terminated." (`m3-05`). Cancel
+   keeps it; confirming removes it. Closing tab m3tab asks "Close tab m3tab and all 1 pane(s)…" and removes it.
+4. Focus workspace "api" moves the focus (`herdr workspace list` confirms `api` focused). "+ Workspace" →
+   "m3ws" creates workspace 3 (`m3-06`).
+5. Fake agent: an agent prompt while it is blocked shows "The agent is waiting for an answer (blocked)…" (`m3-07`).
+   Answering "y" in Line mode gives "approved … done." (`m3-08`).
+
+Open:
+- `agent.prompt` only accepts *named* agents that Herdr itself detects (claude, codex, …). The test fixture's
+  self-reported `fake` agent gets "agent w1:p1 is not an active named agent" (`m3-09`), so a successful
+  agent prompt is untested here. It needs a real agent CLI on the test server.
+- Fixture bug, reported to the test-infra owner: fake-agent restarts `--seq` at 1 on every run, and Herdr ignores
+  reports whose seq isn't above the last one for the same source. So only the first run in a pane changes status.
