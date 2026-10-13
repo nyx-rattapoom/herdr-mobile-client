@@ -98,3 +98,22 @@ describe('ViewedStore', () => {
     expect(v[`p${MAX_VIEWED + 4}`]).toBe(MAX_VIEWED + 4);
   });
 });
+
+describe('agents sheet with local marks', () => {
+  it('puts pinned agents first and leaves snoozed ones out', () => {
+    const agents: AgentMap = new Map([
+      ['p1', { status: 'idle', agent: 'opencode' }],
+      ['p2', { status: 'working', agent: 'claude' }],
+      ['p3', { status: 'blocked', agent: 'codex' }],
+    ]);
+    const marks: Record<string, { pinned?: boolean; muted?: boolean }> = { p1: { pinned: true }, p2: { muted: true } };
+    const flags = { get: (p: string) => marks[p] ?? {}, isSnoozed: (p: string) => p === 'p3' };
+    const rows = agentRows(tree, agents, new Map(), {}, flags);
+    expect(rows.map((r) => [r.paneId, r.group])).toEqual([
+      ['p1', 'pinned'],
+      ['p2', 'working'],
+      ['p4', 'idle'],
+    ]);
+    expect(rows[1].muted).toBe(true);
+  });
+});

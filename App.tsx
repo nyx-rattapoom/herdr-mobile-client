@@ -24,7 +24,7 @@ import {
 import { resolveSelection, selectionForPane, type Selection } from './src/live/workspace';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { HostKeyScreen } from './src/screens/HostKeyScreen';
-import { ActionSheet, PromptDialog } from './src/screens/dialogs';
+import { ActionSheet, PromptDialog, type SheetItem } from './src/screens/dialogs';
 import { Composer } from './src/screens/Composer';
 import { ServerFormScreen } from './src/screens/ServerFormScreen';
 import { SessionsScreen, type SessionEntry, type TreeTarget } from './src/screens/SessionsScreen';
@@ -32,12 +32,13 @@ import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
-import { Busy, colors } from './src/screens/ui';
+import { Busy, MODAL_SWAP_MS, colors } from './src/screens/ui';
 import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import { endpointInUse, type ServerProfile } from './src/store/servers';
 import { AuditLog, type AuditEntry } from './src/store/audit';
+import { PaneFlags, formatUntil, nextClockTime, snoozePresets } from './src/store/paneFlags';
 import { ViewedStore } from './src/store/viewed';
 import { plainKv, useAccount } from './src/useAccount';
 
@@ -45,6 +46,23 @@ const viewedStore = new ViewedStore(plainKv);
 const audit = new AuditLog(plainKv);
 /** Each live session's prompt queue. */
 const queues = new WeakMap<LiveSession, PromptQueues>();
+/** Each live session's local pin/mute/snooze marks. */
+const paneFlags = new WeakMap<LiveSession, PaneFlags>();
+
+/** Local pin/mute/snooze items for a pane's action sheet. */
+function flagItems(live: LiveSession, target: Target): SheetItem[] {
+  const f = paneFlags.get(live);
+  if (!f || target.kind !== 'pane') return [];
+  const id = target.node.pane_id;
+  const cur = f.get(id);
+  return [
+    cur.pinned ? { id: 'local.unpin', label: 'Unpin from the agents list' } : { id: 'local.pin', label: 'Pin to the top of the agents list' },
+    cur.muted ? { id: 'local.unmute', label: 'Unmute notifications' } : { id: 'local.mute', label: 'Mute notifications' },
+    f.isSnoozed(id)
+      ? { id: 'local.unsnooze', label: `Un-snooze (snoozed until ${formatUntil(cur.snoozeUntil ?? 0, Date.now())})` }
+      : { id: 'local.snooze', label: 'Snooze…' },
+  ];
+}
 
 /** Destructive actions recorded in the audit log, with how they read there. */
 const AUDITED: Partial<Record<ActionId, string>> = {
@@ -90,6 +108,7 @@ export default function App() {
   const [manageSheet, setManageSheet] = useState<ServerProfile | null>(null);
   const [settingsMsg, setSettingsMsg] = useState<{ error: string | null; notice: string | null }>({ error: null, notice: null });
   const [prompt, setPrompt] = useState<{ live: LiveSession; target: Target; action: ActionId; title: string } | null>(null);
+  const [snoozing, setSnoozing] = useState<{ live: LiveSession; paneId: string; custom?: boolean } | null>(null);
   const conn = useRef<ServerConnection | null>(null);
   const lives = useRef<LiveSession[]>([]);
   const routeRef = useRef<Route>(route);
@@ -137,7 +156,10 @@ export default function App() {
 
   const home = useCallback(() => {
     attempt.current++;
-    lives.current.forEach((l) => queues.get(l)?.dispose());
+    lives.current.forEach((l) => {
+      queues.get(l)?.dispose();
+      paneFlags.get(l)?.dispose();
+    });
     setResumeNote(null);
     lives.current.forEach((l) => l.stop());
     lives.current = [];
@@ -157,6 +179,8 @@ export default function App() {
   /** Posts a notification unless the user is already looking at that pane. */
   const handleAlert = useCallback((server: ServerProfile, session: string, live: LiveSession, a: AgentAlert) => {
     if (!deduper.current.accept(a, `${server.id}|${session}`)) return;
+    // Muted or snoozed on this phone.
+    if (paneFlags.get(live)?.isSilenced(a.paneId)) return;
     const r = routeRef.current;
     if (
       AppState.currentState === 'active' &&
@@ -229,6 +253,9 @@ export default function App() {
       );
       queues.set(live, queue);
       void queue.load();
+      const flags = new PaneFlags(plainKv, `${server.id}|${session.name}`);
+      paneFlags.set(live, flags);
+      void flags.load();
       let paneSet = '';
       live.subscribe((st) => {
         queue.drive(st.status, st.agents);
@@ -237,6 +264,7 @@ export default function App() {
         if (ids && ids !== paneSet) {
           paneSet = ids;
           void queue.prune(new Set(ids.split(',')));
+          void flags.prune(new Set(ids.split(',')));
         }
       });
       void live.start();
@@ -569,7 +597,8 @@ export default function App() {
       const def = actionsFor(target).find((a) => a.id === id);
       if (!def) return;
       if (def.asksLabel) {
-        setPrompt({ live, target, action: id, title: `${def.label} (optional name)` });
+        // After the sheet this came from has closed (see MODAL_SWAP_MS).
+        setTimeout(() => setPrompt({ live, target, action: id, title: `${def.label} (optional name)` }), MODAL_SWAP_MS);
       } else if (def.destructive) {
         Alert.alert(def.label, confirmText(def, target), [
           { text: 'Cancel', style: 'cancel' },
@@ -732,6 +761,7 @@ export default function App() {
           onReconnect={() => void resume()}
           notice={resumeNote}
           agentsRequest={agentsRequest}
+          flags={paneFlags.get(r.live)}
           viewed={viewed}
           onViewPane={onViewPane}
           onAction={(target) => setSheet({ live: r.live, target })}
@@ -769,9 +799,56 @@ export default function App() {
         {sheet ? (
           <ActionSheet
             title={targetName(sheet.target)}
-            items={actionsFor(sheet.target)}
-            onPick={(id) => pickAction(sheet.live, sheet.target, id as ActionId)}
+            items={[...flagItems(sheet.live, sheet.target), ...actionsFor(sheet.target)]}
+            onPick={(id) => {
+              const f = paneFlags.get(sheet.live);
+              const paneId = sheet.target.kind === 'pane' ? sheet.target.node.pane_id : null;
+              if (!id.startsWith('local.') || !f || !paneId) return pickAction(sheet.live, sheet.target, id as ActionId);
+              setSheet(null);
+              if (id === 'local.pin' || id === 'local.unpin') void f.setPinned(paneId, id === 'local.pin');
+              else if (id === 'local.mute' || id === 'local.unmute') void f.setMuted(paneId, id === 'local.mute');
+              else if (id === 'local.unsnooze') void f.unsnooze(paneId);
+              else if (id === 'local.snooze') {
+                const live = sheet.live;
+                setTimeout(() => setSnoozing({ live, paneId }), MODAL_SWAP_MS);
+              }
+            }}
             onClose={() => setSheet(null)}
+          />
+        ) : null}
+        {snoozing && !snoozing.custom ? (
+          <ActionSheet
+            title={`Snooze ${snoozing.paneId}: hide it from the agents list and silence it until…`}
+            items={[...snoozePresets(Date.now()).map((p) => ({ id: p.id, label: p.label })), { id: 'custom', label: 'Until a time…' }]}
+            onPick={(id) => {
+              if (id === 'custom') {
+                const next = { ...snoozing, custom: true };
+                setSnoozing(null);
+                setTimeout(() => setSnoozing(next), MODAL_SWAP_MS);
+                return;
+              }
+              const preset = snoozePresets(Date.now()).find((p) => p.id === id);
+              if (preset) void paneFlags.get(snoozing.live)?.snooze(snoozing.paneId, preset.until);
+              setSnoozing(null);
+            }}
+            onClose={() => setSnoozing(null)}
+          />
+        ) : null}
+        {snoozing?.custom ? (
+          <PromptDialog
+            title={`Snooze ${snoozing.paneId} until (HH:MM, 24-hour)`}
+            placeholder="e.g. 18:30"
+            okLabel="Snooze"
+            onClose={() => setSnoozing(null)}
+            onSubmit={(value) => {
+              const until = nextClockTime(value, Date.now());
+              if (until === null) {
+                Alert.alert('Snooze', 'Enter a time like 18:30.');
+                return;
+              }
+              void paneFlags.get(snoozing.live)?.snooze(snoozing.paneId, until);
+              setSnoozing(null);
+            }}
           />
         ) : null}
         {manageSheet ? (

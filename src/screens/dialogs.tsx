@@ -28,7 +28,9 @@ export function ActionSheet({
               onPress={() => onPick(it.id)}
               style={({ pressed }) => [sheet.item, { opacity: pressed ? 0.6 : 1 }]}
             >
-              <Text style={[styles.text, { fontSize: 17, color: it.destructive ? colors.danger : colors.text }]}>{it.label}</Text>
+              <Text style={[styles.text, { fontSize: 17, color: it.destructive ? colors.danger : colors.text }]}>
+                {it.label}
+              </Text>
             </Pressable>
           ))}
           <Pressable testID="action-cancel" onPress={onClose} style={sheet.item}>
@@ -43,11 +45,13 @@ export function ActionSheet({
 export function PromptDialog({
   title,
   placeholder,
+  okLabel = 'Create',
   onSubmit,
   onClose,
 }: {
   title: string;
   placeholder?: string;
+  okLabel?: string;
   onSubmit: (value: string) => void;
   onClose: () => void;
 }) {
@@ -69,7 +73,7 @@ export function PromptDialog({
             autoCorrect={false}
             onSubmitEditing={() => onSubmit(value)}
           />
-          <Button testID="prompt-ok" label="Create" onPress={() => onSubmit(value)} />
+          <Button testID="prompt-ok" label={okLabel} onPress={() => onSubmit(value)} />
           <Button testID="prompt-cancel" label="Cancel" kind="secondary" onPress={onClose} />
         </View>
       </KeyboardAvoidingView>

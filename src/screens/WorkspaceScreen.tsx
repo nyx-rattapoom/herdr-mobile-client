@@ -5,6 +5,7 @@ import type { ActionId, Target } from '../live/actions';
 import type { Line } from '../live/ansi';
 import { useLive } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
+import type { PaneFlags } from '../store/paneFlags';
 import {
   paneName,
   paneStatus,
@@ -22,7 +23,7 @@ import { StatusDot } from './SessionsScreen';
 import { SlashButton } from './SlashPalette';
 import { StatusPill } from './StatusPill';
 import { AgentList, AgentsButton, AgentsSheet } from './AgentsSheet';
-import { Button, colors, sheet, styles } from './ui';
+import { Button, MODAL_SWAP_MS, colors, sheet, styles } from './ui';
 
 type Props = {
   live: LiveSession;
@@ -37,6 +38,8 @@ type Props = {
   notice?: string | null;
   /** Bumped to open the agents sheet (e.g. from the ongoing notification). */
   agentsRequest?: number;
+  /** Local pin/mute/snooze marks for this session's panes. */
+  flags?: PaneFlags;
   /** Opens the action sheet for a long-pressed target. */
   onAction: (t: Target) => void;
   /** Runs one action directly (it still asks for a label or confirmation where needed). */
@@ -66,6 +69,7 @@ export function WorkspaceScreen(p: Props) {
   const { ws, tab, pane } = resolveSelection(st.tree, p.sel);
   const select = (s: Selection) => p.onSelect(s);
   const paneId = pane?.pane_id;
+  const paneNode = (id: string) => st.tree.flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((x) => x.pane_id === id);
   // Tablets and landscape phones keep the agent list beside the pane instead of in a sheet.
   const wide = useWindowDimensions().width >= WIDE_DP;
   const { onViewPane } = p;
@@ -86,16 +90,15 @@ export function WorkspaceScreen(p: Props) {
               <AgentList
                 live={p.live}
                 viewed={p.viewed}
+                flags={p.flags}
                 current={paneId}
                 onOpen={(r) => {
                   const s = selectionForPane(st.tree, r.paneId);
                   if (s) select(s);
                 }}
-                onClosePane={(r) => {
-                  const node = st.tree
-                    .flatMap((w) => w.tabs.flatMap((t) => t.panes))
-                    .find((x) => x.pane_id === r.paneId);
-                  if (node) p.onPick({ kind: 'pane', node }, 'pane.close');
+                onLongPress={(r) => {
+                  const node = paneNode(r.paneId);
+                  if (node) p.onAction({ kind: 'pane', node });
                 }}
               />
             </View>
@@ -118,7 +121,7 @@ export function WorkspaceScreen(p: Props) {
               </Text>
               <LiveStatusLine st={st} testID={`live-${p.session}`} extra={p.host} />
             </Pressable>
-            {wide ? null : <AgentsButton live={p.live} onPress={() => setAgentsOpen(true)} />}
+            {wide ? null : <AgentsButton live={p.live} flags={p.flags} onPress={() => setAgentsOpen(true)} />}
           </View>
           {p.notice ? (
             <Text
@@ -233,17 +236,18 @@ export function WorkspaceScreen(p: Props) {
         <AgentsSheet
           live={p.live}
           viewed={p.viewed}
+          flags={p.flags}
           onClose={() => setAgentsOpen(false)}
           onOpen={(r) => {
             setAgentsOpen(false);
             const s = selectionForPane(st.tree, r.paneId);
             if (s) select(s);
           }}
-          onClosePane={(r) => {
-            const node = st.tree.flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((x) => x.pane_id === r.paneId);
+          onLongPress={(r) => {
+            const node = paneNode(r.paneId);
             if (!node) return;
             setAgentsOpen(false);
-            p.onPick({ kind: 'pane', node }, 'pane.close');
+            setTimeout(() => p.onAction({ kind: 'pane', node }), MODAL_SWAP_MS);
           }}
         />
       ) : null}
