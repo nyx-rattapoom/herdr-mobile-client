@@ -31,7 +31,74 @@ export function AgentsButton({ live, onPress }: { live: LiveSession; onPress: ()
   );
 }
 
-/** Every agent in the session, most urgent first. */
+/** Every agent in the session, grouped most urgent first; shared by the sheet and the side panel. */
+export function AgentList({
+  live,
+  viewed,
+  onOpen,
+  onClosePane,
+  current,
+}: {
+  live: LiveSession;
+  viewed: Record<string, number>;
+  onOpen: (r: AgentRow) => void;
+  onClosePane: (r: AgentRow) => void;
+  /** The pane on screen, highlighted in the side panel. */
+  current?: string;
+}) {
+  const st = useLive(live);
+  const rows = agentRows(st.tree, st.agents, st.since, viewed);
+  return (
+    <ScrollView>
+      {rows.length === 0 ? (
+        <Text style={[styles.text, { paddingVertical: 16 }]}>No agents in this session.</Text>
+      ) : null}
+      {AGENT_GROUPS.map((g) => {
+        const items = rows.filter((r) => r.group === g.id);
+        if (!items.length) return null;
+        return (
+          <View key={g.id} testID={`agents-group-${g.id}`}>
+            <Text style={[styles.label, { marginTop: 12 }]}>
+              {g.title} · {items.length}
+            </Text>
+            {items.map((r) => (
+              <Pressable
+                key={r.paneId}
+                testID={`agent-${r.paneId}`}
+                onPress={() => onOpen(r)}
+                onLongPress={() => onClosePane(r)}
+                style={({ pressed }) => [
+                  sheet.row,
+                  r.paneId === current ? { backgroundColor: colors.bg } : null,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <StatusDot value={r.status} size={10} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.text, { fontWeight: r.unseen ? '700' : '400' }]} numberOfLines={1}>
+                    {r.name}
+                  </Text>
+                  <Text style={styles.muted} numberOfLines={1}>
+                    {r.agent} · {r.workspace} · {r.tab}
+                  </Text>
+                </View>
+                {r.unseen ? (
+                  <Text testID={`unseen-${r.paneId}`} style={[styles.muted, { color: colors.ok }]}>
+                    new
+                  </Text>
+                ) : (
+                  <Text style={styles.muted}>{r.status === 'blocked' ? 'needs you' : r.status}</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+/** The agent list as a bottom sheet. */
 export function AgentsSheet({
   live,
   viewed,
@@ -45,55 +112,12 @@ export function AgentsSheet({
   onClosePane: (r: AgentRow) => void;
   onClose: () => void;
 }) {
-  const st = useLive(live);
-  const rows = agentRows(st.tree, st.agents, st.since, viewed);
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={sheet.backdrop} onPress={onClose} testID="sheet-backdrop">
         <Pressable style={[sheet.panel, { maxHeight: '80%' }]} testID="agents-sheet">
           <Text style={[styles.muted, { marginBottom: 4 }]}>Agents · tap to open, long-press to close</Text>
-          {rows.length === 0 ? (
-            <Text style={[styles.text, { paddingVertical: 16 }]}>No agents in this session.</Text>
-          ) : null}
-          <ScrollView>
-            {AGENT_GROUPS.map((g) => {
-              const items = rows.filter((r) => r.group === g.id);
-              if (!items.length) return null;
-              return (
-                <View key={g.id} testID={`agents-group-${g.id}`}>
-                  <Text style={[styles.label, { marginTop: 12 }]}>
-                    {g.title} · {items.length}
-                  </Text>
-                  {items.map((r) => (
-                    <Pressable
-                      key={r.paneId}
-                      testID={`agent-${r.paneId}`}
-                      onPress={() => onOpen(r)}
-                      onLongPress={() => onClosePane(r)}
-                      style={({ pressed }) => [sheet.row, { opacity: pressed ? 0.6 : 1 }]}
-                    >
-                      <StatusDot value={r.status} size={10} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.text, { fontWeight: r.unseen ? '700' : '400' }]} numberOfLines={1}>
-                          {r.name}
-                        </Text>
-                        <Text style={styles.muted} numberOfLines={1}>
-                          {r.agent} · {r.workspace} · {r.tab}
-                        </Text>
-                      </View>
-                      {r.unseen ? (
-                        <Text testID={`unseen-${r.paneId}`} style={[styles.muted, { color: colors.ok }]}>
-                          new
-                        </Text>
-                      ) : (
-                        <Text style={styles.muted}>{r.status === 'blocked' ? 'needs you' : r.status}</Text>
-                      )}
-                    </Pressable>
-                  ))}
-                </View>
-              );
-            })}
-          </ScrollView>
+          <AgentList live={live} viewed={viewed} onOpen={onOpen} onClosePane={onClosePane} />
         </Pressable>
       </Pressable>
     </Modal>

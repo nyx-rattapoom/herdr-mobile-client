@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 
@@ -40,6 +41,8 @@ class MonitorService : Service() {
     private const val CHANNEL_ID = "herdr-monitor"
     private const val NOTIFICATION_ID = 4711
     private const val EXTRA_TEXT = "text"
+    /** Must match AGENTS_URL in src/live/summary.ts. */
+    private const val AGENTS_URL = "herdrclient://agents"
 
     fun start(context: Context, text: String) {
       val i = Intent(context, MonitorService::class.java).putExtra(EXTRA_TEXT, text)
@@ -66,9 +69,14 @@ class MonitorService : Service() {
           },
         )
       }
+      // Tapping opens the app's agents sheet: a VIEW intent carrying AGENTS_URL, sent explicitly
+      // to the launcher activity (React Native reads VIEW intents as Linking URLs).
       val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
-      val pi = launch?.let {
-        PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+      val pi = launch?.component?.let { component ->
+        val open = Intent(Intent.ACTION_VIEW, Uri.parse(AGENTS_URL))
+          .setComponent(component)
+          .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
       }
       val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(context, CHANNEL_ID)
       else @Suppress("DEPRECATION") Notification.Builder(context)

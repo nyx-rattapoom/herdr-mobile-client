@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SPECIAL_KEYS, describeActionError, inputRequest, keyRequest } from '../live/actions';
@@ -58,6 +67,8 @@ export function Composer({
   // For sudo/password prompts: hide what is typed, keep it out of suggestions and out of drafts.
   const [hidden, setHidden] = useState(false);
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];
+  // Landscape phones: keep the input short so the pane stays visible.
+  const short = useWindowDimensions().height < 500;
 
   const setText = (t: string) => {
     setTextState(t);
@@ -170,7 +181,7 @@ export function Composer({
           testID="input-text"
           secureTextEntry={hidden}
           multiline={!hidden}
-          style={[styles.input, bar.input]}
+          style={[styles.input, bar.input, short ? { minHeight: 40, maxHeight: 80 } : null]}
           value={text}
           onChangeText={setText}
           placeholder={placeholder}

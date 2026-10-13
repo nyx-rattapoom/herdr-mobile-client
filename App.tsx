@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, BackHandler, Share } from 'react-native';
+import { Alert, AppState, BackHandler, Linking, Share } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { actionRequest, actionsFor, confirmText, describeActionError, targetName, type ActionId, type Target } from './src/live/actions';
@@ -11,6 +11,7 @@ import { draftKey } from './src/live/drafts';
 import { ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
 import { resumeConnection } from './src/live/resume';
+import { AGENTS_URL, monitorText } from './src/live/summary';
 import {
   onNotificationTap,
   postAgentNotification,
@@ -377,9 +378,48 @@ export default function App() {
     return () => sub.remove();
   }, [resume]);
 
+  /** The current server's sessions, while connected. */
+  const liveList = route.name === 'workspace' ? route.parent.entries : route.name === 'sessions' ? route.entries : null;
+
+  // The ongoing notification summarises agent statuses on this server while connected.
+  const monitorServer = route.name === 'workspace' ? route.parent.server.label : route.name === 'sessions' ? route.server.label : null;
+  useEffect(() => {
+    if (!monitorServer || !liveList) return;
+    let last = '';
+    const refresh = () => {
+      const text = monitorText(
+        monitorServer,
+        liveList.flatMap((e) => (e.live ? [e.live.getState().agents] : [])),
+      );
+      if (text === last) return;
+      last = text;
+      startBackgroundMonitoring(text);
+    };
+    refresh();
+    const subs = liveList.flatMap((e) => (e.live ? [e.live.subscribe(refresh)] : []));
+    return () => subs.forEach((u) => u());
+  }, [monitorServer, liveList]);
+
+  // Tapping the ongoing notification opens the agents sheet.
+  const [agentsRequest, setAgentsRequest] = useState(0);
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      if (url !== AGENTS_URL) return;
+      const r = routeRef.current;
+      if (r.name === 'sessions') {
+        const first = r.entries.find((e) => e.live);
+        if (!first?.live) return;
+        setRoute({ name: 'workspace', parent: r, live: first.live, session: first.session.name, sel: {} });
+      } else if (r.name !== 'workspace') {
+        return;
+      }
+      setAgentsRequest((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
+
   // A live view that loses its SSH session while the app is open reconnects too, at most every 10 s.
   const lastAutoResume = useRef(0);
-  const liveList = route.name === 'workspace' ? route.parent.entries : route.name === 'sessions' ? route.entries : null;
   useEffect(() => {
     const subs = (liveList ?? []).flatMap((e) =>
       e.live
@@ -672,6 +712,7 @@ export default function App() {
           onBack={() => (skipsSessions(r.parent) ? home() : setRoute(r.parent))}
           onReconnect={() => void resume()}
           notice={resumeNote}
+          agentsRequest={agentsRequest}
           viewed={viewed}
           onViewPane={onViewPane}
           onAction={(target) => setSheet({ live: r.live, target })}
