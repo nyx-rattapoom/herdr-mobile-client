@@ -6,3 +6,4 @@ ios/
 *.apk
 *.aab
 .env*
+.work/
