@@ -161,3 +161,32 @@ Open / future:
 - Biometric-protected credentials were tested on the Android 11 emulator only. Keystore invalidation after a
   biometric change is handled by message but wasn't reproduced.
 - iOS is not started (the native module is Android-only).
+
+## Security review fixes (2026-10-13)
+
+An independent review found 0 critical, 0 high, 2 medium and 10 low issues. It verified pin-before-auth clean end to end. Fixes:
+
+| ID | Fix | Tests |
+|---|---|---|
+| M1 | `LineBuffer` is linear (it only splits when a chunk has a newline). Lines over 2M chars close the connection with a `protocol` error. Pane text is capped at 1M chars (newest kept) before ANSI parsing. Snapshot records are capped at 1000 per kind, with typed field copies. | client, paneReader, snapshot |
+| M2 | The installer download uses `curl --proto =https --tlsv1.2`. The Install card says it "downloads and runs https://herdr.dev/install.sh as <user> on <host>". | sessions |
+| L1 | Server-supplied socket paths go into a shell probe only if they match `^/[A-Za-z0-9_./+-]+$`. All generated scripts are single-line (csh/tcsh) and pass `sh -n`. | sessions |
+| L2 | `Exec.run` has a deadline (120 s by default, 300 s for install). It drains stdout/stderr concurrently and always closes the channel and cancels readers. `openSocket` closes the channel on failure. | JVM `execTimesOutAndClosesTheChannel` |
+| L3 | Keyboard-interactive answers one hidden prompt containing "password", once, and never 2FA/OTP prompts. | JVM `PasswordUserInfoTest` |
+| L4 | Secret get/set/delete wait until settings have loaded. | secrets |
+| L5 | Turning biometrics off needs a fresh `authenticateAsync` and re-reads the vault (no cached unlock). | secrets |
+| L6 | `android.allowBackup=false`. The input bar has a hidden-input toggle for password prompts. Optional FLAG_SECURE setting. | — (emulator) |
+| L7 | Agent alerts use a new channel `agent-alerts` with lock-screen visibility PRIVATE (the old channel is deleted). Names and labels in alerts are sanitised and truncated. | text |
+| L8 | The ANSI parser drops C1 controls and bidi overrides/isolates. Snapshot labels, titles and agent names are sanitised (`cleanLabel`) and ids are type-checked. | ansi, text, snapshot |
+| L9 | The host-key hint follows the algorithm (ed25519/ecdsa/rsa). "Forget host key" remembers the old fingerprint, and the next confirmation shows "Previously pinned … Same key as before / The key has changed". | pinning |
+| L10 | `npx expo install --fix` aligned `@types/jest`. `npm audit` still reports advisories (braces, node-forge, sprintf-js, uuid). All of them come through Expo's CLI/config-plugin tooling (`@expo/cli`, `xcode`) or jest, none of which is in the app bundle. They're left for an Expo SDK update. | — |
+
+Also found while verifying: removing a server profile purged the host-key pin of another profile on the same host:port. Pins are now kept while any profile uses the endpoint (`endpointInUse`).
+
+Residual risk (M2): `install.sh` itself has no published checksum, so it's trusted through HTTPS/TLS to herdr.dev only. The installer then verifies the binary's SHA-256 against Herdr's release manifest. Install runs only after the user taps it on a card that names the URL, user and host.
+
+Emulator evidence (screenshots `sec-*`):
+- **M1**: a malicious socket on herdr-test (reverse stream-local forward to a local server that sends 15 MB without a newline), reached through a profile with herdr path `/home/herdr/fake-herdr`. The session shows "reconnecting… response line longer than 2097152 characters" within 4 s (`sec-01`). The server sees a broken pipe after about 2 MB. Retries back off (5 attempts in about 24 s), the UI keeps navigating, and logcat shows no ANR.
+- **L3**: password logins still work: the fallback and password profiles connect (`Accepted password` in sshd). The 2FA/OTP refusal is covered by JVM tests (the test sshd has no keyboard-interactive challenge).
+- **L6**: the installed package has no `ALLOW_BACKUP` in `pkgFlags`. The hidden-input toggle shows `••••••••` (`sec-02`). With "Hide app content from screenshots" on, the window flags include `SECURE` and `screencap` yields no image. Turned off, screenshots work again (`sec-03`).
+- **L9**: after Forget host key, reconnecting shows "Confirming the host key again…", "Previously pinned … SHA256:9LrZ…/o · Same key as before" and `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` (`sec-04`).
