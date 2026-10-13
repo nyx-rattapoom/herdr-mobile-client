@@ -48,6 +48,7 @@ const liveLabel: Record<LiveStatus, [string, string]> = {
   live: ['● live', colors.ok],
   reconnecting: ['reconnecting…', colors.warn],
   offline: ['offline', colors.danger],
+  unsupported: ['not supported', colors.danger],
 };
 
 type TreeProps = Pick<Props, 'onOpenPane' | 'onAction' | 'onReconnect'>;
@@ -92,9 +93,29 @@ function LiveTree({ live, session, onOpenPane, onAction, onReconnect }: { live: 
     <View>
       <Text testID={`live-${session}`} style={[styles.muted, { color }]}>
         {label}
-        {st.snapshot?.version ? `  ·  herdr ${st.snapshot.version}` : ''}
+        {(st.snapshot?.version ?? st.server?.version) ? `  ·  herdr ${st.snapshot?.version ?? st.server?.version}` : ''}
       </Text>
-      {st.status !== 'live' && st.error ? <Text style={styles.muted}>{st.error}</Text> : null}
+      {st.status === 'unsupported' ? (
+        <View testID={`unsupported-${session}`}>
+          <ErrorBox message={st.error ?? 'This server is not supported.'} />
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Button testID={`recheck-${session}`} label="Check again" onPress={() => live.retryNow()} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                testID={`continue-${session}`}
+                label="Continue anyway"
+                kind="secondary"
+                onPress={() => live.continueAnyway()}
+              />
+            </View>
+          </View>
+          <Text style={[styles.muted, { marginTop: 4 }]}>Continuing may leave some features broken.</Text>
+        </View>
+      ) : st.status !== 'live' && st.error ? (
+        <Text style={styles.muted}>{st.error}</Text>
+      ) : null}
       {st.status === 'reconnecting' ? (
         <View style={{ marginTop: 8 }}>
           <Button testID={`retry-${session}`} label="Retry now" kind="secondary" onPress={() => live.retryNow()} />

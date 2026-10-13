@@ -1,7 +1,7 @@
 import { HerdrClient } from '../protocol/client';
 import { LiveSession, TREE_EVENTS } from '../live/LiveSession';
 import type { AgentAlert } from '../live/agents';
-import { FakeHerdr } from '../testing/fakes';
+import { FakeHerdr, legacyHerdr } from '../testing/fakes';
 
 const snap = (panes: string[], agents: { pane_id: string; agent_status: string }[] = []) => ({
   type: 'session_snapshot',
@@ -167,5 +167,84 @@ describe('LiveSession', () => {
     await expect(b).resolves.toEqual({ type: 'pane_read', read: { text: '' } });
     for (const c of server.connections) expect(c.requests.filter((r) => r.method !== 'events.subscribe').length).toBeLessThanOrEqual(1);
     live.stop();
+  });
+
+  describe('against an older Herdr', () => {
+    // Herdr 0.7.5 knows every type the app subscribes to except workspace.reordered.
+    const known075 = [...TREE_EVENTS.filter((t) => t !== 'workspace.reordered'), 'pane.agent_status_changed'];
+    const subscribeAttempts = (server: FakeHerdr) =>
+      server.connections.filter((c) => c.requests.some((r) => r.method === 'events.subscribe')).length;
+
+    it('stops with a too-old message before subscribing, and does not retry', async () => {
+      const { server, live } = setup();
+      legacyHerdr(server, known075);
+      void live.start();
+      await settle(200);
+      const st = live.getState();
+      expect(st.status).toBe('unsupported');
+      expect(st.server).toEqual({ version: '0.7.5', protocol: 17 });
+      expect(st.error).toMatch(/Herdr 0\.7\.5 on this server is too old; this app needs 0\.8\.0 or newer/);
+      const opened = server.connections.length;
+      await settle(60_000);
+      expect(server.connections.length).toBe(opened);
+      expect(subscribeAttempts(server)).toBe(0);
+      live.stop();
+    });
+
+    it('continues anyway by dropping the event types the server rejects', async () => {
+      const { server, live } = setup();
+      legacyHerdr(server, known075);
+      void live.start();
+      await settle(200);
+      live.continueAnyway();
+      await settle(200);
+      const st = live.getState();
+      expect(st.status).toBe('live');
+      expect(st.droppedEvents).toEqual(['workspace.reordered']);
+      expect(st.tree[0].tabs[0].panes[0].pane_id).toBe('w1:p1');
+      const sub = server.subscriptions[server.subscriptions.length - 1];
+      const types = (sub.requests[0].params as { subscriptions: { type: string }[] }).subscriptions.map((s) => s.type);
+      expect(types).not.toContain('workspace.reordered');
+      expect(types).toContain('pane.agent_status_changed');
+      // Only the first subscription named it; resubscriptions (e.g. for new panes) leave it out.
+      const named = server.connections
+        .flatMap((c) => c.requests)
+        .filter((r) => r.method === 'events.subscribe')
+        .map((r) =>
+          (r.params as { subscriptions: { type: string }[] }).subscriptions.some(
+            (x) => x.type === 'workspace.reordered',
+          ),
+        );
+      expect(named[0]).toBe(true);
+      expect(named.slice(1)).not.toContain(true);
+      expect(named.length).toBeGreaterThan(2);
+      live.stop();
+    });
+
+    it('drops rejected event types on a current version too, so new optional events stay optional', async () => {
+      const { server, live } = setup();
+      legacyHerdr(server, known075, '0.8.0');
+      void live.start();
+      await settle(200);
+      expect(live.getState()).toMatchObject({ status: 'live', droppedEvents: ['workspace.reordered'] });
+      live.stop();
+    });
+
+    it('treats any other uncorrelated invalid_request as fatal instead of reconnecting forever', async () => {
+      const { server, live } = setup();
+      server.uncorrelatedInvalid = true;
+      server.handlers['events.subscribe'] = () => {
+        throw { code: 'invalid_request', message: 'invalid request: missing field `type`' };
+      };
+      void live.start();
+      await settle(200);
+      const st = live.getState();
+      expect(st.status).toBe('unsupported');
+      expect(st.error).toMatch(/rejected a request from the app \(invalid request: missing field `type`\)/);
+      const attempts = subscribeAttempts(server);
+      await settle(60_000);
+      expect(subscribeAttempts(server)).toBe(attempts);
+      live.stop();
+    });
   });
 });

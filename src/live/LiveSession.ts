@@ -1,5 +1,6 @@
 import { HerdrApiError, type HerdrClient, type HerdrEvent } from '../protocol/client';
 import { buildTree, fetchSnapshot, type SessionSnapshot, type WorkspaceNode } from '../protocol/snapshot';
+import { checkVersion, parseUnknownVariant, ping, type ServerInfo } from '../protocol/version';
 import { agentAlerts, agentsFromSnapshot, type AgentAlert, type AgentMap } from './agents';
 
 /** Lifecycle events that can change the workspace → tab → pane tree. */
@@ -25,11 +26,16 @@ export const TREE_EVENTS = [
   'pane.agent_detected',
 ] as const;
 
-export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
+/** `unsupported`: the server's Herdr is too old or rejected a request as malformed; no retries. */
+export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline' | 'unsupported';
 
 export type LiveState = {
   status: LiveStatus;
   error?: string;
+  /** From `ping` on connect. */
+  server?: ServerInfo;
+  /** Event types this server rejected and that are no longer subscribed to. */
+  droppedEvents?: string[];
   snapshot?: SessionSnapshot;
   tree: WorkspaceNode[];
   agents: AgentMap;
@@ -62,6 +68,10 @@ export class LiveSession {
   private refreshAgain = false;
   private attempt = 0;
   private stopped = false;
+  /** Set by continueAnyway(): skip the version check. */
+  private allowOld = false;
+  /** Event types the server rejected; not subscribed to again. */
+  private dropped = new Set<string>();
   /** The first snapshot is a baseline: agents already blocked when we connect don't alert. */
   private baselined = false;
   private readonly opts: Required<Omit<LiveOptions, 'onAlert'>> & Pick<LiveOptions, 'onAlert'>;
@@ -111,6 +121,12 @@ export class LiveSession {
     return this.withConnection((c) => c.request<T>(method, params));
   }
 
+  /** Connects to a server whose Herdr is older than the minimum; some features may fail. */
+  continueAnyway(): void {
+    this.allowOld = true;
+    this.retryNow();
+  }
+
   /** Forces a reconnect (e.g. after the user taps Retry). */
   retryNow(): void {
     if (this.stopped) return;
@@ -134,6 +150,10 @@ export class LiveSession {
 
   private async connect(): Promise<void> {
     try {
+      const server = await this.withConnection(ping);
+      if (this.stopped) return;
+      this.update({ server });
+      if (!this.allowOld) checkVersion(server);
       await this.resubscribe(this.paneIds(this.state.snapshot));
       await this.refresh();
       this.attempt = 0;
@@ -146,8 +166,32 @@ export class LiveSession {
     return (s?.panes ?? []).map((p) => p.pane_id).sort();
   }
 
-  /** Opens a new subscription before dropping the old one so no events are missed. */
+  /**
+   * Opens a new subscription before dropping the old one so no events are missed. A server that
+   * rejects an event type it doesn't know lists the ones it does; subscribe again without the others.
+   */
   private async resubscribe(panes: string[]): Promise<void> {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await this.subscribeOnce(panes);
+      } catch (e) {
+        const v = e instanceof HerdrApiError && e.code === 'invalid_request' ? parseUnknownVariant(e.message) : null;
+        if (!v || tries >= 2 || !this.wanted(panes).some((s) => s.type === v.unknown)) throw e;
+        const known = new Set(v.expected);
+        this.wanted(panes).forEach((s) => known.has(s.type) || this.dropped.add(s.type));
+        this.update({ droppedEvents: [...this.dropped] });
+      }
+    }
+  }
+
+  private wanted(panes: string[]): { type: string; pane_id?: string }[] {
+    return [
+      ...TREE_EVENTS.map((type) => ({ type })),
+      ...panes.map((pane_id) => ({ type: 'pane.agent_status_changed', pane_id })),
+    ].filter((s) => !this.dropped.has(s.type));
+  }
+
+  private async subscribeOnce(panes: string[]): Promise<void> {
     const client = await this.open();
     client.onEvent((e) => this.handleEvent(client, e));
     client.onStreamError((err) => {
@@ -157,11 +201,12 @@ export class LiveSession {
     client.onClose((reason) => {
       if (client === this.sub && !this.stopped) this.handleFailure(new HerdrApiError('closed', reason));
     });
-    const subscriptions: Record<string, unknown>[] = [
-      ...TREE_EVENTS.map((type) => ({ type })),
-      ...panes.map((pane_id) => ({ type: 'pane.agent_status_changed', pane_id })),
-    ];
-    await client.request('events.subscribe', { subscriptions });
+    try {
+      await client.request('events.subscribe', { subscriptions: this.wanted(panes) });
+    } catch (e) {
+      client.close();
+      throw e;
+    }
     if (this.stopped) {
       client.close();
       return;
@@ -240,6 +285,18 @@ export class LiveSession {
     const message = (e as { message?: string })?.message ?? String(e);
     if (this.opts.fatalCodes.includes(code)) {
       this.update({ status: 'offline', error: message });
+      return;
+    }
+    if (code === 'unsupported_version') {
+      this.update({ status: 'unsupported', error: message });
+      return;
+    }
+    if (code === 'invalid_request') {
+      // The same request would be rejected again; retrying only loops.
+      this.update({
+        status: 'unsupported',
+        error: `Herdr on this server rejected a request from the app (${message.replace(/, expected .*$/s, '')}). Updating Herdr may fix this.`,
+      });
       return;
     }
     this.update({ status: 'reconnecting', error: message });
