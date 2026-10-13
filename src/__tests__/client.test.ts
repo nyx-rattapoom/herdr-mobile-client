@@ -60,6 +60,32 @@ describe('HerdrClient', () => {
     await expect(p).resolves.toEqual({ type: 'pong', new_field: true });
   });
 
+  it('gives an error with an empty id to the one request in flight, as Herdr 0.7 sends it', async () => {
+    const t = new FakeTransport();
+    const c = new HerdrClient(t);
+    const streamErrors: HerdrApiError[] = [];
+    c.onStreamError((e) => streamErrors.push(e));
+    const p = c.request('events.subscribe', { subscriptions: [] });
+    await flush();
+    t.push('{"id":"","error":{"code":"invalid_request","message":"invalid request: unknown variant `x`"}}\n');
+    await expect(p).rejects.toMatchObject({ code: 'invalid_request', message: 'invalid request: unknown variant `x`' });
+    expect(streamErrors).toEqual([]);
+  });
+
+  it('treats an empty-id error as a stream error when it could belong to more than one request', async () => {
+    const t = new FakeTransport();
+    const c = new HerdrClient(t, 50);
+    const streamErrors: HerdrApiError[] = [];
+    c.onStreamError((e) => streamErrors.push(e));
+    const a = c.request('ping').catch((e) => e);
+    const b = c.request('ping').catch((e) => e);
+    await flush();
+    t.push('{"id":"","error":{"code":"invalid_request","message":"bad"}}\n');
+    expect(streamErrors.map((e) => e.code)).toEqual(['invalid_request']);
+    expect(await a).toMatchObject({ code: 'timeout' });
+    expect(await b).toMatchObject({ code: 'timeout' });
+  });
+
   it('times out a request that gets no response', async () => {
     jest.useFakeTimers();
     try {

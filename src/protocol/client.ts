@@ -122,8 +122,14 @@ export class HerdrClient {
       this.eventHandler({ event, data: typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {} });
       return;
     }
-    if (typeof id !== 'string') return;
     const err = error !== undefined ? toApiError(error) : null;
+    if (err && (id === '' || id === undefined) && this.pending.size === 1) {
+      // Herdr before 0.8 answers a request it can't parse with an empty id. It reads one request
+      // per connection, so the error belongs to the one in flight.
+      this.settle([...this.pending.keys()][0])?.reject(err);
+      return;
+    }
+    if (typeof id !== 'string') return;
     const p = this.settle(id);
     if (!p) {
       if (err) this.streamErrorHandler(err);
