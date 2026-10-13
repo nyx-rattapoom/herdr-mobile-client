@@ -55,8 +55,7 @@ export function AddServerScreen({ onCancel, onSave }: Props) {
         {field('User', username, setUsername)}
         {field('Password', password, setPassword, { secureTextEntry: true })}
         <Text style={styles.muted}>
-          The password is stored in Android Keystore-backed storage and is sent only after you have confirmed the
-          server's host key.
+          {"The password is stored in Android Keystore-backed storage and is sent only after you have confirmed the server's host key."}
         </Text>
         <Button testID="save-server" label="Save" onPress={save} disabled={saving} />
       </ScrollView>

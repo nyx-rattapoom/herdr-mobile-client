@@ -34,8 +34,7 @@ export function HostKeyScreen({ server, decision, onTrust, onCancel }: Props) {
             {decision.presented.algorithm} {decision.presented.fingerprint}
           </Text>
           <Text style={styles.muted}>
-            If you verified the change with the server's administrator, long-press the server in the list and choose
-            "Forget host key", then connect again.
+            {"If you verified the change with the server's administrator, long-press the server in the list and choose \"Forget host key\", then connect again."}
           </Text>
           <Button testID="hostkey-back" label="Back to servers" kind="secondary" onPress={onCancel} />
         </ScrollView>
