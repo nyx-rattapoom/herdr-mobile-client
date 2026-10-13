@@ -361,7 +361,7 @@ export default function App() {
           conn.current = next as ServerConnection;
         },
         lives: lives.current,
-        onReconnecting: () => setResumeNote('The connection dropped while the app was in the background. Reconnecting…'),
+        onReconnecting: () => setResumeNote('The SSH connection dropped. Reconnecting…'),
       });
       setResumeNote(null);
     } catch (e) {

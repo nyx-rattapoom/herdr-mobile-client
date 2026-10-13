@@ -20,6 +20,7 @@ import { LiveBanner, LiveStatusLine } from './LiveBanner';
 import { PaneView } from './PaneView';
 import { StatusDot } from './SessionsScreen';
 import { SlashButton } from './SlashPalette';
+import { StatusPill } from './StatusPill';
 import { AgentList, AgentsButton, AgentsSheet } from './AgentsSheet';
 import { Button, colors, sheet, styles } from './ui';
 
@@ -199,12 +200,15 @@ export function WorkspaceScreen(p: Props) {
               paneId={pane.pane_id}
               footer={p.footer ? (poke, blank, screen) => p.footer?.(pane.pane_id, poke, blank, screen) : undefined}
               overlay={(poke) => (
-                <SlashButton
-                  live={p.live}
-                  paneId={pane.pane_id}
-                  agent={st.agents.get(pane.pane_id)?.agent ?? pane.agent}
-                  onSent={poke}
-                />
+                <>
+                  <StatusPill live={p.live} paneId={pane.pane_id} onReconnect={p.onReconnect} />
+                  <SlashButton
+                    live={p.live}
+                    paneId={pane.pane_id}
+                    agent={st.agents.get(pane.pane_id)?.agent ?? pane.agent}
+                    onSent={poke}
+                  />
+                </>
               )}
             />
           ) : (
