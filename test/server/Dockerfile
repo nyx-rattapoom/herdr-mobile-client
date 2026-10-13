@@ -1,6 +1,7 @@
 # Test SSH servers for exercising the app from the Android emulator (host reachable as 10.0.2.2).
 # Test-only credentials. Build args:
 #   INSTALL_HERDR=1|0   install and start Herdr (0 = exercise the install flow)
+#   HERDR_VERSION=x.y.z  pin an older Herdr release from GitHub instead of the latest (old-server tests)
 #   STREAMLOCAL=yes|no  sshd AllowStreamLocalForwarding (no = exercise the forwarding-disabled error)
 #   INSTALL_OPENCODE=1|0 install opencode (a real agent Herdr detects) + its Herdr integration
 FROM debian:bookworm-slim
@@ -11,7 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd
 RUN useradd -m -s /bin/bash herdr && echo 'herdr:herdr-test' | chpasswd
 USER herdr
-RUN if [ "$INSTALL_HERDR" = 1 ]; then curl -fsSL https://herdr.dev/install.sh | sh; fi
+ARG HERDR_VERSION=
+RUN if [ "$INSTALL_HERDR" = 1 ] && [ -z "$HERDR_VERSION" ]; then curl -fsSL https://herdr.dev/install.sh | sh; fi
+RUN if [ "$INSTALL_HERDR" = 1 ] && [ -n "$HERDR_VERSION" ]; then mkdir -p ~/.local/bin \
+      && curl -fsSL --proto '=https' -o ~/.local/bin/herdr \
+           "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-$(uname -m | sed 's/arm64/aarch64/')" \
+      && chmod +x ~/.local/bin/herdr && ~/.local/bin/herdr --version | grep -qx "herdr ${HERDR_VERSION}"; fi
 ARG INSTALL_OPENCODE=0
 # Free opencode Zen model: no API key or account needed. Prompts are sent to opencode.ai.
 ARG OPENCODE_MODEL=opencode/big-pickle

@@ -7,9 +7,10 @@ Test-only credentials (`herdr` / `herdr-test`); bound to localhost only. From th
 | `herdr-test` | 2222 | Normal: Herdr running, stream-local forwarding allowed |
 | `herdr-test-nofwd` | 2223 | `AllowStreamLocalForwarding no` → forwarding-prohibited error |
 | `herdr-test-noherdr` | 2224 | Herdr not installed → install flow |
+| `herdr-test-old` | 2226 | Herdr 0.7.5 (protocol 17), an old server: rejects newer event types such as `workspace.reordered` |
 | `herdr-test-agent` | 2225 | Herdr + opencode (a real agent Herdr detects) on a free opencode Zen model; same host key as `herdr-test` |
 
-    test/server/up.sh            # build images and (re)start all four
+    test/server/up.sh            # build images and (re)start all five
     REGEN_HOST_KEYS=1 test/server/up.sh herdr-test   # new host key → host-key-changed path
 
 Fake agent (drives working → blocked → working → idle):
