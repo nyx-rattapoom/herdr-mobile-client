@@ -10,7 +10,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SPECIAL_KEYS, describeActionError, inputRequest, keyRequest, keysOf } from '../live/actions';
 import type { Line } from '../live/ansi';
@@ -81,6 +81,7 @@ export function Composer({
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];
   // Landscape phones: keep the input short so the pane stays visible.
   const short = useWindowDimensions().height < 500;
+  const insets = useSafeAreaInsets();
 
   const setText = (t: string) => {
     if (armed) {
@@ -299,10 +300,21 @@ export function Composer({
       </View>
       {queue ? <QueueList queue={queue} paneId={paneId} onSent={onSent} /> : null}
       {expanded ? (
-        <Modal animationType="slide" onRequestClose={() => setExpanded(false)}>
-          {/* The modal window is edge-to-edge; keep its controls out from under the status bar. */}
-          <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-            <KeyboardAvoidingView behavior="padding" style={[styles.screen, { padding: 12, gap: 8 }]} testID="editor">
+        <Modal statusBarTranslucent navigationBarTranslucent animationType="slide" onRequestClose={() => setExpanded(false)}>
+          {/* The modal window is edge-to-edge and outside the root SafeAreaView: pad for the system
+              bars here, outside the KeyboardAvoidingView, which overwrites its own paddingBottom. */}
+          <View
+            style={[
+              styles.screen,
+              {
+                paddingTop: insets.top + 12,
+                paddingBottom: insets.bottom + 12,
+                paddingLeft: insets.left + 12,
+                paddingRight: insets.right + 12,
+              },
+            ]}
+          >
+            <KeyboardAvoidingView behavior="padding" style={[styles.screen, { gap: 8 }]} testID="editor">
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Pressable testID="editor-collapse" onPress={() => setExpanded(false)} hitSlop={8}>
                   <Text style={styles.backText}>
@@ -335,7 +347,7 @@ export function Composer({
                 <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Send</Text>
               </Pressable>
             </KeyboardAvoidingView>
-          </SafeAreaView>
+          </View>
         </Modal>
       ) : null}
     </View>
