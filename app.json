@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "io.github.herdrclient"
+      "bundleIdentifier": "dev.nyx.herdrclient"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "io.github.herdrclient",
+      "package": "dev.nyx.herdrclient",
       "versionCode": 3,
       "allowBackup": false
     },
