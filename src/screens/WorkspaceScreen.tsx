@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 
 import type { ActionId, Target } from '../live/actions';
 import type { Line } from '../live/ansi';
@@ -20,6 +20,7 @@ import {
 import { LiveBanner, LiveStatusLine } from './LiveBanner';
 import { PaneView } from './PaneView';
 import { StatusDot } from './SessionsScreen';
+import { BottomSheet } from './Sheet';
 import { SlashButton } from './SlashPalette';
 import { StatusPill } from './StatusPill';
 import { AgentList, AgentsButton, AgentsSheet } from './AgentsSheet';
@@ -292,43 +293,39 @@ function WorkspaceSheet({
 }) {
   const st = useLive(live);
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={sheet.backdrop} onPress={onClose} testID="sheet-backdrop">
-        <Pressable style={sheet.panel} testID="ws-sheet">
-          <Text style={[styles.muted, { marginBottom: 8 }]}>Workspaces · long-press to close</Text>
-          <ScrollView style={{ maxHeight: 420 }}>
-            {st.tree.map((w) => {
-              const sum = workspaceSummary(w, st.agents);
-              const on = w.workspace_id === current;
-              return (
-                <Pressable
-                  key={w.workspace_id}
-                  testID={`ws-${w.workspace_id}`}
-                  onPress={() => onSelect(w.workspace_id)}
-                  onLongPress={() => onCloseWorkspace(w)}
-                  style={({ pressed }) => [sheet.row, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <StatusDot value={sum.status} size={10} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.text, { fontSize: 17, fontWeight: on ? '700' : '400' }]} numberOfLines={1}>
-                      {workspaceName(w)}
-                    </Text>
-                    <Text style={styles.muted}>
-                      {sum.agents} agent{sum.agents === 1 ? '' : 's'} · {sum.tabs} tab{sum.tabs === 1 ? '' : 's'}
-                      {sum.status ? ` · ${sum.status === 'blocked' ? 'needs you' : sum.status}` : ''}
-                    </Text>
-                  </View>
-                  {on ? <Text style={{ color: colors.accent, fontSize: 18 }}>✓</Text> : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <Pressable testID="ws-new" onPress={onNew} style={sheet.row}>
-            <Text style={[styles.text, { fontSize: 17, color: colors.accent }]}>＋ New workspace</Text>
-          </Pressable>
-        </Pressable>
+    <BottomSheet onClose={onClose} testID="ws-sheet" style={{ maxHeight: '90%' }}>
+      <Text style={[styles.muted, { marginBottom: 8 }]}>Workspaces · long-press to close</Text>
+      <ScrollView style={{ maxHeight: 420, flexShrink: 1 }}>
+        {st.tree.map((w) => {
+          const sum = workspaceSummary(w, st.agents);
+          const on = w.workspace_id === current;
+          return (
+            <Pressable
+              key={w.workspace_id}
+              testID={`ws-${w.workspace_id}`}
+              onPress={() => onSelect(w.workspace_id)}
+              onLongPress={() => onCloseWorkspace(w)}
+              style={({ pressed }) => [sheet.row, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <StatusDot value={sum.status} size={10} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.text, { fontSize: 17, fontWeight: on ? '700' : '400' }]} numberOfLines={1}>
+                  {workspaceName(w)}
+                </Text>
+                <Text style={styles.muted}>
+                  {sum.agents} agent{sum.agents === 1 ? '' : 's'} · {sum.tabs} tab{sum.tabs === 1 ? '' : 's'}
+                  {sum.status ? ` · ${sum.status === 'blocked' ? 'needs you' : sum.status}` : ''}
+                </Text>
+              </View>
+              {on ? <Text style={{ color: colors.accent, fontSize: 18 }}>✓</Text> : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <Pressable testID="ws-new" onPress={onNew} style={sheet.row}>
+        <Text style={[styles.text, { fontSize: 17, color: colors.accent }]}>＋ New workspace</Text>
       </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }
 

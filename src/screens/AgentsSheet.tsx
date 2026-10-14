@@ -1,10 +1,11 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { AGENT_GROUPS, agentRows, type AgentRow } from '../live/agentList';
 import { useLive } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import { formatUntil, type PaneFlags } from '../store/paneFlags';
+import { BottomSheet } from './Sheet';
 import { StatusDot } from './SessionsScreen';
 import { colors, sheet, styles } from './ui';
 
@@ -159,16 +160,12 @@ export function AgentsSheet({
   onClose: () => void;
 }) {
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={sheet.backdrop} onPress={onClose} testID="sheet-backdrop">
-        <Pressable style={[sheet.panel, { maxHeight: '80%' }]} testID="agents-sheet">
-          <Text style={[styles.muted, { marginBottom: 4 }]}>
-            Agents · tap to open, long-press for pin, mute, snooze, close
-          </Text>
-          <AgentList live={live} viewed={viewed} flags={flags} onOpen={onOpen} onLongPress={onLongPress} />
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <BottomSheet onClose={onClose} testID="agents-sheet" style={{ maxHeight: '80%' }}>
+      <Text style={[styles.muted, { marginBottom: 4 }]}>
+        Agents · tap to open, long-press for pin, mute, snooze, close
+      </Text>
+      <AgentList live={live} viewed={viewed} flags={flags} onOpen={onOpen} onLongPress={onLongPress} />
+    </BottomSheet>
   );
 }
 

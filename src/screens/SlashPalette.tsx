@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, FlatList, Modal, PanResponder, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, FlatList, PanResponder, Pressable, Text, View } from 'react-native';
 
 import { SPECIAL_KEYS, describeActionError, keyRequest, keysOf } from '../live/actions';
 import type { LiveSession } from '../live/LiveSession';
 import { SlashMenu, type SlashCommand } from '../live/slash';
+import { BottomSheet } from './Sheet';
 import { colors, sheet, styles } from './ui';
 
 const SIZE = 52;
@@ -179,72 +180,68 @@ function SlashSheet({
   };
 
   return (
-    <Modal transparent animationType="slide" onRequestClose={close}>
-      <Pressable style={sheet.backdrop} onPress={close} testID="slash-backdrop">
-        <Pressable style={[sheet.panel, { maxHeight: '75%' }]} testID="slash-sheet">
-          <Text style={[styles.muted, { marginBottom: 4 }]}>
-            {agent ? `Slash commands · ${agent} · read from its screen` : 'Slash commands'}
-          </Text>
-          {phase === 'disabled' ? (
-            <Text testID="slash-disabled" style={[styles.text, { paddingVertical: 16 }]}>
-              No agent detected in this pane, so there is no slash-command menu to read. Long-press the / button for
-              special keys.
-            </Text>
-          ) : phase === 'loading' ? (
-            <View style={{ paddingVertical: 24, alignItems: 'center', gap: 8 }}>
-              <ActivityIndicator color={colors.accent} />
-              <Text style={styles.muted}>Typed / in the pane; reading the menu…</Text>
-            </View>
-          ) : phase === 'error' ? (
-            <Text testID="slash-error" style={[styles.text, { color: colors.danger, paddingVertical: 16 }]}>
-              Couldn&apos;t send input to the pane: {error}
-            </Text>
-          ) : phase === 'empty' ? (
-            <Text testID="slash-empty" style={[styles.text, { paddingVertical: 16 }]}>
-              The agent didn&apos;t show a slash-command menu. Closing this sends Esc to clear the /.
-            </Text>
-          ) : (
-            <FlatList
-              testID="slash-list"
-              data={commands}
-              keyExtractor={(c) => c.name}
-              renderItem={({ item }) => (
-                <Pressable
-                  testID={`slash-${item.name.slice(1)}`}
-                  disabled={busy}
-                  onPress={() => void choose(item)}
-                  style={({ pressed }) => [sheet.row, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <Text style={[styles.mono, { color: colors.accent, minWidth: 110 }]}>{item.name}</Text>
-                  <Text style={[styles.muted, { flex: 1 }]} numberOfLines={2}>
-                    {item.description}
+    <BottomSheet onClose={close} testID="slash-sheet" backdropTestID="slash-backdrop" style={{ maxHeight: '75%' }}>
+      <Text style={[styles.muted, { marginBottom: 4 }]}>
+        {agent ? `Slash commands · ${agent} · read from its screen` : 'Slash commands'}
+      </Text>
+      {phase === 'disabled' ? (
+        <Text testID="slash-disabled" style={[styles.text, { paddingVertical: 16 }]}>
+          No agent detected in this pane, so there is no slash-command menu to read. Long-press the / button for
+          special keys.
+        </Text>
+      ) : phase === 'loading' ? (
+        <View style={{ paddingVertical: 24, alignItems: 'center', gap: 8 }}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.muted}>Typed / in the pane; reading the menu…</Text>
+        </View>
+      ) : phase === 'error' ? (
+        <Text testID="slash-error" style={[styles.text, { color: colors.danger, paddingVertical: 16 }]}>
+          Couldn&apos;t send input to the pane: {error}
+        </Text>
+      ) : phase === 'empty' ? (
+        <Text testID="slash-empty" style={[styles.text, { paddingVertical: 16 }]}>
+          The agent didn&apos;t show a slash-command menu. Closing this sends Esc to clear the /.
+        </Text>
+      ) : (
+        <FlatList
+          testID="slash-list"
+          data={commands}
+          keyExtractor={(c) => c.name}
+          renderItem={({ item }) => (
+            <Pressable
+              testID={`slash-${item.name.slice(1)}`}
+              disabled={busy}
+              onPress={() => void choose(item)}
+              style={({ pressed }) => [sheet.row, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Text style={[styles.mono, { color: colors.accent, minWidth: 110 }]}>{item.name}</Text>
+              <Text style={[styles.muted, { flex: 1 }]} numberOfLines={2}>
+                {item.description}
+              </Text>
+            </Pressable>
+          )}
+          ListFooterComponent={
+            <View>
+              {error ? <Text style={[styles.muted, { color: colors.danger, marginTop: 8 }]}>{error}</Text> : null}
+              {menu.complete ? (
+                <Text testID="slash-complete" style={[styles.muted, { paddingVertical: 12 }]}>
+                  All {commands.length} commands shown.
+                </Text>
+              ) : (
+                <Pressable testID="slash-more" disabled={busy} onPress={() => void loadMore()} style={sheet.row}>
+                  <Text style={[styles.text, { color: colors.accent }]}>
+                    {busy ? 'Loading…' : `Load more (scrolls the agent's menu) · ${commands.length} so far`}
                   </Text>
                 </Pressable>
               )}
-              ListFooterComponent={
-                <View>
-                  {error ? <Text style={[styles.muted, { color: colors.danger, marginTop: 8 }]}>{error}</Text> : null}
-                  {menu.complete ? (
-                    <Text testID="slash-complete" style={[styles.muted, { paddingVertical: 12 }]}>
-                      All {commands.length} commands shown.
-                    </Text>
-                  ) : (
-                    <Pressable testID="slash-more" disabled={busy} onPress={() => void loadMore()} style={sheet.row}>
-                      <Text style={[styles.text, { color: colors.accent }]}>
-                        {busy ? 'Loading…' : `Load more (scrolls the agent's menu) · ${commands.length} so far`}
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              }
-            />
-          )}
-          <Pressable testID="slash-close" onPress={close} style={[sheet.row, { borderBottomWidth: 0 }]}>
-            <Text style={[styles.text, { color: colors.muted }]}>Close (sends Esc)</Text>
-          </Pressable>
-        </Pressable>
+            </View>
+          }
+        />
+      )}
+      <Pressable testID="slash-close" onPress={close} style={[sheet.row, { borderBottomWidth: 0 }]}>
+        <Text style={[styles.text, { color: colors.muted }]}>Close (sends Esc)</Text>
       </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }
 
@@ -262,31 +259,27 @@ function KeysSheet({
 }) {
   const [error, setError] = useState<string | null>(null);
   return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={sheet.backdrop} onPress={onClose} testID="keys-backdrop">
-        <Pressable style={sheet.panel} testID="keys-sheet">
-          <Text style={[styles.muted, { marginBottom: 8 }]}>Special keys · tap to send</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {SPECIAL_KEYS.map((k) => (
-              <Pressable
-                key={k.key}
-                testID={`sheet-key-${k.key}`}
-                onPress={() =>
-                  void live
-                    .query(keyRequest(paneId, keysOf(k)).method, keyRequest(paneId, keysOf(k)).params)
-                    .then(onSent)
-                    .catch((e) => setError(describeActionError(e)))
-                }
-                style={({ pressed }) => [fab.key, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <Text style={styles.mono}>{k.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {error ? <Text style={[styles.muted, { color: colors.danger, marginTop: 8 }]}>{error}</Text> : null}
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <BottomSheet animation="fade" onClose={onClose} testID="keys-sheet" backdropTestID="keys-backdrop">
+      <Text style={[styles.muted, { marginBottom: 8 }]}>Special keys · tap to send</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {SPECIAL_KEYS.map((k) => (
+          <Pressable
+            key={k.key}
+            testID={`sheet-key-${k.key}`}
+            onPress={() =>
+              void live
+                .query(keyRequest(paneId, keysOf(k)).method, keyRequest(paneId, keysOf(k)).params)
+                .then(onSent)
+                .catch((e) => setError(describeActionError(e)))
+            }
+            style={({ pressed }) => [fab.key, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={styles.mono}>{k.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {error ? <Text style={[styles.muted, { color: colors.danger, marginTop: 8 }]}>{error}</Text> : null}
+    </BottomSheet>
   );
 }
 
