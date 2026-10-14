@@ -151,7 +151,7 @@ Emulator evidence (screenshots `m5-*`):
    After restoring the network, "Try again" → *● live*. With the server stopped: "Herdr is not running" → Start →
    *● live*.
 5. Biometrics (temporary emulator PIN + fingerprint, removed afterwards): enable → system prompt "Protect saved
-   credentials" (`m5-11`, `m5-12`). Connecting asks "Unlock saved server credentials" (`m5-13`). Cancel → "Unlock
+   credentials" (`m5-12`). Connecting asks "Unlock saved server credentials". Cancel → "Unlock
    cancelled…" (`m5-14`). A fingerprint touch → *● live*. Disabled again → connects without a prompt.
 6. Notification with the new icon (`m5-15`).
 
