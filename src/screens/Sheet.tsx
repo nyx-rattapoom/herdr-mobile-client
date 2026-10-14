@@ -17,7 +17,10 @@ export function overlayInsets(insets: EdgeInsets, panelBottom: number = sheet.pa
   };
 }
 
-/** A bottom sheet in its own modal: tap outside to close. */
+/**
+ * A bottom sheet in its own modal: tap outside to close. It never grows past the space between
+ * the system bars; content that can get long goes in a ScrollView so it shrinks and scrolls.
+ */
 export function BottomSheet({
   onClose,
   animation = 'slide',
@@ -38,7 +41,7 @@ export function BottomSheet({
     <Modal transparent statusBarTranslucent navigationBarTranslucent animationType={animation} onRequestClose={onClose}>
       <Pressable style={[sheet.backdrop, pad.backdrop]} onPress={onClose} testID={backdropTestID}>
         {/* A Pressable (not a View) so taps inside the panel don't reach the backdrop. */}
-        <Pressable style={[sheet.panel, style, pad.panel]} testID={testID}>
+        <Pressable style={[sheet.panel, { maxHeight: '100%' }, style, pad.panel]} testID={testID}>
           {children}
         </Pressable>
       </Pressable>

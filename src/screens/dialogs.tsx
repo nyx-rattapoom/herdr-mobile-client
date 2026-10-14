@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { BottomSheet, CenteredDialog } from './Sheet';
 import { Button, colors, sheet, styles } from './ui';
@@ -20,18 +20,21 @@ export function ActionSheet({
   return (
     <BottomSheet animation="fade" onClose={onClose} testID="action-sheet">
       <Text style={[styles.muted, { marginBottom: 8 }]}>{title}</Text>
-      {items.map((it) => (
-        <Pressable
-          key={it.id}
-          testID={`action-${it.id}`}
-          onPress={() => onPick(it.id)}
-          style={({ pressed }) => [item, { opacity: pressed ? 0.6 : 1 }]}
-        >
-          <Text style={[styles.text, { fontSize: 17, color: it.destructive ? colors.danger : colors.text }]}>
-            {it.label}
-          </Text>
-        </Pressable>
-      ))}
+      {/* Landscape phones can't fit every action at once. */}
+      <ScrollView style={{ flexShrink: 1, flexGrow: 0 }} testID="action-list">
+        {items.map((it) => (
+          <Pressable
+            key={it.id}
+            testID={`action-${it.id}`}
+            onPress={() => onPick(it.id)}
+            style={({ pressed }) => [item, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={[styles.text, { fontSize: 17, color: it.destructive ? colors.danger : colors.text }]}>
+              {it.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
       <Pressable testID="action-cancel" onPress={onClose} style={item}>
         <Text style={[styles.text, { fontSize: 17, color: colors.muted }]}>Cancel</Text>
       </Pressable>
