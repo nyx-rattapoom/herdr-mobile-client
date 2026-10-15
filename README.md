@@ -29,3 +29,7 @@ npm run typecheck && npx expo lint
 # Native tests; integration tests run against test/server when HERDR_TEST_SSH is set
 cd android && HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222 ./gradlew :herdr-ssh:testDebugUnitTest
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
