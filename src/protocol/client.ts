@@ -68,7 +68,11 @@ export class HerdrClient {
     return this.closedReason !== null;
   }
 
-  async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = this.timeoutMs,
+  ): Promise<T> {
     if (this.closedReason !== null) {
       throw new HerdrApiError('closed', `connection closed: ${this.closedReason}`);
     }
@@ -77,8 +81,8 @@ export class HerdrClient {
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new HerdrApiError('timeout', `${method} timed out after ${this.timeoutMs} ms`));
-      }, this.timeoutMs);
+        reject(new HerdrApiError('timeout', `${method} timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });
     try {

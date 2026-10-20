@@ -145,8 +145,8 @@ export class LiveSession {
   }
 
   /** Read-only requests that should not trigger a tree refresh (e.g. pane.read polling). */
-  async query<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    return this.withConnection((c) => c.request<T>(method, params));
+  async query<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
+    return this.withConnection((c) => c.request<T>(method, params, timeoutMs));
   }
 
   /** Connects to a server whose Herdr is older than the minimum; some features may fail. */

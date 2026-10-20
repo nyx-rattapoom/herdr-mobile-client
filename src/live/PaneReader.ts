@@ -1,9 +1,15 @@
 export type PaneOutput = { text: string; truncated: boolean; lines: number };
+/** `truncated`: Herdr stopped before the top of the agent's history (1000 rows or its time limit). */
+export type AgentHistory = { text: string; truncated: boolean };
 
-type Query = <T>(method: string, params: Record<string, unknown>) => Promise<T>;
+type Query = <T>(method: string, params: Record<string, unknown>, timeoutMs?: number) => Promise<T>;
 
 export const DEFAULT_LINES = 300;
 export const MAX_LINES = 10_000;
+/** Rows asked of a full-screen agent's history; Herdr collects at most 1000. */
+export const HISTORY_LINES = 1000;
+/** Herdr scrolls the agent for up to 15 s, then up to 5 s to bring it back to the bottom. */
+export const HISTORY_TIMEOUT_MS = 25_000;
 /** Upper bound on text handed to the ANSI parser and renderer; the newest output is kept. */
 export const MAX_TEXT_CHARS = 1_000_000;
 
@@ -28,6 +34,7 @@ export class PaneReader {
   /** The previous read failed; the next success is re-emitted even if unchanged, clearing the error. */
   private failed = false;
   private lines = DEFAULT_LINES;
+  private history: Promise<AgentHistory> | null = null;
 
   constructor(
     private readonly query: Query,
@@ -57,6 +64,35 @@ export class PaneReader {
     return true;
   }
 
+  /**
+   * Reads a full-screen agent's own transcript once. On the alternate screen `recent` holds only
+   * the visible grid; for a plain-text read of an idle agent it recognises, Herdr scrolls the agent
+   * and collects the pages. Otherwise it returns the screen as usual. Polling pauses meanwhile so
+   * it doesn't capture the agent mid-scroll.
+   */
+  loadHistory(): Promise<AgentHistory> {
+    if (this.history) return this.history;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const read = (async () => {
+      const res = await this.query<{ read?: { text?: string; truncated?: boolean } }>(
+        'pane.read',
+        { pane_id: this.paneId, source: 'recent', lines: HISTORY_LINES, format: 'text' },
+        HISTORY_TIMEOUT_MS,
+      );
+      const { text, capped } = capText(typeof res?.read?.text === 'string' ? res.read.text : '');
+      return { text, truncated: capped || res?.read?.truncated === true };
+    })();
+    this.history = read;
+    const resume = () => {
+      if (this.history !== read) return;
+      this.history = null;
+      this.pokeNow();
+    };
+    read.then(resume, resume);
+    return read;
+  }
+
   /** Reads now instead of waiting for the next interval, e.g. right after sending input. */
   pokeNow(): void {
     if (!this.running) return;
@@ -70,7 +106,7 @@ export class PaneReader {
   }
 
   private async tick(): Promise<void> {
-    if (!this.running || this.inFlight) return;
+    if (!this.running || this.inFlight || this.history) return;
     this.inFlight = true;
     try {
       const lines = this.lines;

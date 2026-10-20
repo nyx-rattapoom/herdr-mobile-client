@@ -99,6 +99,27 @@ describe('HerdrClient', () => {
     }
   });
 
+  it('lets one request wait longer than the default timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      const c = new HerdrClient(new FakeTransport(), 500);
+      let settled = false;
+      const p = c.request('pane.read', {}, 2000).finally(() => (settled = true));
+      p.catch(() => {});
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      jest.advanceTimersByTime(1001);
+      await expect(p).rejects.toMatchObject({ code: 'timeout', message: 'pane.read timed out after 2000 ms' });
+      // Leaving it out keeps the default.
+      const q = c.request('ping', {}, undefined);
+      jest.advanceTimersByTime(501);
+      await expect(q).rejects.toMatchObject({ message: 'ping timed out after 500 ms' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('fails pending and future requests when the connection closes', async () => {
     const t = new FakeTransport();
     const c = new HerdrClient(t);

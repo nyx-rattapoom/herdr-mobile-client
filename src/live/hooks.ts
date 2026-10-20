@@ -24,7 +24,7 @@ export function usePaneOutput(live: LiveSession, paneId: string) {
   const reader = useMemo(
     () =>
       new PaneReader(
-        (m, p) => live.query(m, p),
+        (m, p, t) => live.query(m, p, t),
         paneId,
         (o) => {
           let m = lastOutput.get(live);
