@@ -272,7 +272,8 @@ Requested as a feature batch. Everything was checked on the emulator against `he
    - Screenshots: `quick-answers.png`, `quick-answers-confirm.png`.
 7. **Resume and reconnect** (ad3b73d): on returning to the foreground the app checks the SSH session with a cheap exec.
    - If it is gone, the app reconnects in place with the pinned key and every live view retries. The screen, selection, drafts, last output and per-pane scroll position stay.
-   - A session dropped while the app is open reconnects the same way (at most every 10 s), and Reconnect now reconnects in place.
+   - A session dropped while the app is open reconnects the same way, and Reconnect now reconnects in place.
+   - Since 1.1.3 reconnecting retries with backoff (1 s doubling to 30 s) until the server answers, also in the background (a headless JS task keeps timers running while monitoring; biometric-locked credentials wait for the foreground). A silent link is noticed within ~20 s. Checked on emulator against :2225 by pausing the container 60–90 s in the foreground and background, and by killing the user's sshd twice 6 s apart.
    - The output list uses fixed row heights so a saved scroll position restores exactly (same top row after switching tabs).
    - Tested by killing the user's sshd on :2225 with the app in the background and in the foreground.
    - Screenshots: `resume-reconnecting.png` (the brief "not connected" while the dead session is detected), `resume-reconnected.png`, `resume-scroll-kept.png`.

@@ -140,6 +140,15 @@ export class ServerConnection {
 
 export const probeHostKey = (host: string, port: number) => HerdrSsh.probeHostKey(host, port);
 
+/**
+ * Whether opening a new SSH session may work if tried again later: the network or server is
+ * unreachable for now. Authentication, host key and credential errors need the user.
+ */
+export function isRetryableSshError(e: unknown): boolean {
+  const code = (e as { code?: string })?.code;
+  return code === 'ERR_CONNECT' || code === 'ERR_TIMEOUT' || code === 'ERR_SSH';
+}
+
 /** User-facing text for native error codes. */
 export function describeSshError(e: unknown): string {
   if (e instanceof ConnectStepError) return e.message;

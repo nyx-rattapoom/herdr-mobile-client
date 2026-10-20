@@ -18,6 +18,8 @@ android {
 }
 
 dependencies {
+  // Headless JS tasks keep JS timers running in the background while monitoring.
+  implementation 'com.facebook.react:react-android'
   // SSH with direct-streamlocal@openssh.com support (see docs/SPIKE.md).
   implementation 'com.github.mwiede:jsch:2.28.8'
   // JSch uses its Bouncy Castle implementations for Ed25519/X25519/ChaCha20 on Android.

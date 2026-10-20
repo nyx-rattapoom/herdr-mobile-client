@@ -11,7 +11,7 @@ import { draftKey } from './src/live/drafts';
 import { ConnectStepError, type ConnectProgress } from './src/live/connectSteps';
 import { LiveSession } from './src/live/LiveSession';
 import { PromptQueues } from './src/live/promptQueue';
-import { resumeConnection } from './src/live/resume';
+import { Reconnector, type ReconnectState } from './src/live/resume';
 import { AGENTS_URL, monitorText } from './src/live/summary';
 import {
   onNotificationTap,
@@ -34,7 +34,7 @@ import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, MODAL_SWAP_MS, colors } from './src/screens/ui';
 import type { DiscoveryResult } from './src/protocol/sessions';
-import { ServerConnection, describeSshError, probeHostKey } from './src/ssh/connection';
+import { ServerConnection, describeSshError, isRetryableSshError, probeHostKey } from './src/ssh/connection';
 import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
 import { endpointInUse, type ServerProfile } from './src/store/servers';
 import { AuditLog, type AuditEntry } from './src/store/audit';
@@ -97,6 +97,24 @@ class Cancelled extends Error {}
 
 /** How long step 6 waits for the first snapshot. */
 const SNAPSHOT_TIMEOUT_MS = 20_000;
+/** Request failures that may mean the SSH link died without closing (timeouts, channels that won't open). */
+const SUSPECT_CODES = ['timeout', 'ERR_TIMEOUT', 'ERR_CHANNEL'];
+
+/** The connection notice shown above a workspace while the SSH session is being replaced. */
+function reconnectNotice(r: ReconnectState): string | null {
+  switch (r.kind) {
+    case 'idle':
+      return null;
+    case 'reconnecting':
+      return r.error === undefined
+        ? 'The SSH connection dropped. Reconnecting…'
+        : `Reconnecting… The last try failed: ${describeSshError(r.error)} Trying again automatically.`;
+    case 'waiting':
+      return 'The SSH connection dropped. Unlock to reconnect.';
+    case 'failed':
+      return `Reconnecting failed: ${describeSshError(r.error)}`;
+  }
+}
 
 export default function App() {
   const account = useAccount();
@@ -111,6 +129,14 @@ export default function App() {
   const [snoozing, setSnoozing] = useState<{ live: LiveSession; paneId: string; custom?: boolean } | null>(null);
   const conn = useRef<ServerConnection | null>(null);
   const lives = useRef<LiveSession[]>([]);
+  /** Keeps the current server's SSH connection working; replaced per connection. */
+  const reconnector = useRef<Reconnector | null>(null);
+  const [reconnect, setReconnect] = useState<ReconnectState>({ kind: 'idle' });
+  const biometricRef = useRef(account.settings.biometric);
+  useEffect(() => {
+    biometricRef.current = account.settings.biometric;
+  }, [account.settings.biometric]);
+
   const routeRef = useRef<Route>(route);
   const deduper = useRef(new AlertDeduper());
   const pendingTap = useRef<AlertTarget | null>(null);
@@ -160,7 +186,9 @@ export default function App() {
       queues.get(l)?.dispose();
       paneFlags.get(l)?.dispose();
     });
-    setResumeNote(null);
+    reconnector.current?.stop();
+    reconnector.current = null;
+    setReconnect({ kind: 'idle' });
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     conn.current?.close();
@@ -237,8 +265,13 @@ export default function App() {
     const entries: SessionEntry[] = (discovery.herdrFound ? discovery.sessions : []).map((session) => {
       if (!session.running) return { session };
       const live: LiveSession = new LiveSession(() => openSocket(session.socketPath), {
-        // Retrying cannot fix a dead SSH session or an sshd that forbids socket forwarding.
-        fatalCodes: ['ERR_NO_SESSION', 'ERR_FORWARDING_PROHIBITED'],
+        // Retrying cannot fix an sshd that forbids socket forwarding. A dead SSH session is
+        // replaced by the reconnector, and the view keeps retrying meanwhile.
+        fatalCodes: ['ERR_FORWARDING_PROHIBITED'],
+        // A request that hangs or can't open a channel may mean the link died silently.
+        onRequestError: (e) => {
+          if (SUSPECT_CODES.includes((e as { code?: string })?.code ?? '')) reconnector.current?.kick({ auto: true });
+        },
         onAlert: (a) => handleAlert(server, session.name, live, a),
         onContinueAnyway: (version) =>
           void audit.record({
@@ -299,6 +332,36 @@ export default function App() {
     [showSessions, startSessions],
   );
 
+  /**
+   * Supervises the connection to `server`. When the SSH session dies, a new one is
+   * opened in place with the pinned key, retrying with backoff, and every live view retries over
+   * it. The screen, selection, last output and scroll positions stay as they were.
+   */
+  const superviseConnection = useCallback(
+    (server: ServerProfile) => {
+      reconnector.current?.stop();
+      setReconnect({ kind: 'idle' });
+      const r: Reconnector = new Reconnector({
+        current: () => conn.current,
+        reopen: async () => {
+          const pin = await pins.get(server.host, server.port);
+          if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
+          return ServerConnection.open({ ...server, ...(await credentialsFor(server)) }, pin);
+        },
+        install: (next) => {
+          conn.current = next as ServerConnection;
+        },
+        lives: () => lives.current,
+        isFatal: (e) => !isRetryableSshError(e),
+        // Biometric-protected credentials can only be unlocked in the foreground.
+        canReopen: () => AppState.currentState === 'active' || !biometricRef.current,
+        onState: (st) => reconnector.current === r && setReconnect(st),
+      });
+      reconnector.current = r;
+    },
+    [pins, credentialsFor],
+  );
+
   /** Runs one connect step: shows it, and names it in the error if it fails. */
   const step = useCallback(async <T,>(id: number, n: number, fn: () => Promise<T>, note?: (r: T) => string | undefined): Promise<T> => {
     if (id !== attempt.current || !progress.current) throw new Cancelled();
@@ -329,6 +392,7 @@ export default function App() {
         throw new Cancelled();
       }
       conn.current = c;
+      superviseConnection(server);
       await step(id, 3, () => c.herdrVersion(server.herdrPath), (v) => (v ? `herdr ${v}` : 'not installed'));
       const route = await step(
         id,
@@ -346,7 +410,7 @@ export default function App() {
       }
       showSessions(route);
     },
-    [credentialsFor, startSessions, showSessions, step],
+    [credentialsFor, startSessions, showSessions, step, superviseConnection],
   );
 
   /** Runs the official installer (if needed) and starts a server, then reloads the session list. */
@@ -374,6 +438,9 @@ export default function App() {
 
   const fail = useCallback((e: unknown) => {
     if (e instanceof Cancelled) return;
+    reconnector.current?.stop();
+    reconnector.current = null;
+    setReconnect({ kind: 'idle' });
     lives.current.forEach((l) => l.stop());
     lives.current = [];
     conn.current?.close();
@@ -382,54 +449,20 @@ export default function App() {
     setRoute({ name: 'servers' });
   }, []);
 
-  const resuming = useRef(false);
-  const [resumeNote, setResumeNote] = useState<string | null>(null);
-
-  /**
-   * Back in the foreground (or on Reconnect): if the SSH session died meanwhile, open a new one
-   * in place with the pinned key, and let every live view retry. The screen, selection, last
-   * output and scroll positions stay as they were.
-   */
-  const resume = useCallback(async () => {
-    const r = routeRef.current;
-    const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
-    if (!parent || !conn.current || resuming.current) return;
-    const server = parent.server;
-    resuming.current = true;
-    try {
-      await resumeConnection({
-        current: () => conn.current,
-        reopen: async () => {
-          const pin = await pins.get(server.host, server.port);
-          if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
-          return ServerConnection.open({ ...server, ...(await credentialsFor(server)) }, pin);
-        },
-        install: (next) => {
-          conn.current = next as ServerConnection;
-        },
-        lives: lives.current,
-        onReconnecting: () => setResumeNote('The SSH connection dropped. Reconnecting…'),
-      });
-      setResumeNote(null);
-    } catch (e) {
-      setResumeNote(`Reconnecting failed: ${describeSshError(e)}`);
-    } finally {
-      resuming.current = false;
-    }
-  }, [pins, credentialsFor]);
-
+  // Back in the foreground: check the connection now, even after a failure that needed the user.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') void resume();
+      if (s === 'active') reconnector.current?.kick();
     });
     return () => sub.remove();
-  }, [resume]);
+  }, []);
 
   /** The current server's sessions, while connected. */
   const liveList = route.name === 'workspace' ? route.parent.entries : route.name === 'sessions' ? route.entries : null;
 
   // The ongoing notification summarises agent statuses on this server while connected.
   const monitorServer = route.name === 'workspace' ? route.parent.server.label : route.name === 'sessions' ? route.server.label : null;
+  const link = reconnect.kind === 'idle' ? 'up' : reconnect.kind;
   useEffect(() => {
     if (!monitorServer || !liveList) return;
     let last = '';
@@ -437,6 +470,7 @@ export default function App() {
       const text = monitorText(
         monitorServer,
         liveList.flatMap((e) => (e.live ? [e.live.getState().agents] : [])),
+        link,
       );
       if (text === last) return;
       last = text;
@@ -445,7 +479,7 @@ export default function App() {
     refresh();
     const subs = liveList.flatMap((e) => (e.live ? [e.live.subscribe(refresh)] : []));
     return () => subs.forEach((u) => u());
-  }, [monitorServer, liveList]);
+  }, [monitorServer, liveList, link]);
 
   // Tapping the ongoing notification opens the agents sheet.
   const [agentsRequest, setAgentsRequest] = useState(0);
@@ -465,23 +499,21 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // A live view that loses its SSH session while the app is open reconnects too, at most every 10 s.
-  const lastAutoResume = useRef(0);
+  // A live view that lost its SSH session, in the foreground or not, has the connection replaced.
+  // A closed subscription is checked too: it arrives as a native event, while the view's own
+  // retry (which would report ERR_NO_SESSION) needs a JS timer, and those stop with the screen.
   useEffect(() => {
     const subs = (liveList ?? []).flatMap((e) =>
       e.live
         ? [
             e.live.subscribe((st) => {
-              if (st.status !== 'offline' || AppState.currentState !== 'active') return;
-              if (Date.now() - lastAutoResume.current < 10_000) return;
-              lastAutoResume.current = Date.now();
-              void resume();
+              if (st.errorCode === 'ERR_NO_SESSION' || st.errorCode === 'closed') reconnector.current?.kick({ auto: true });
             }),
           ]
         : [],
     );
     return () => subs.forEach((u) => u());
-  }, [liveList, resume]);
+  }, [liveList]);
 
   const open = useCallback(
     async (server: ServerProfile) => {
@@ -758,8 +790,8 @@ export default function App() {
           sel={r.sel}
           onSelect={(sel) => setRoute((cur) => (cur.name === 'workspace' && cur.live === r.live ? { ...cur, sel } : cur))}
           onBack={() => (skipsSessions(r.parent) ? home() : setRoute(r.parent))}
-          onReconnect={() => void resume()}
-          notice={resumeNote}
+          onReconnect={() => reconnector.current?.kick()}
+          notice={reconnectNotice(reconnect)}
           agentsRequest={agentsRequest}
           flags={paneFlags.get(r.live)}
           viewed={viewed}

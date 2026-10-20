@@ -9,6 +9,11 @@ import com.jcraft.jsch.JSchException
 import com.jcraft.jsch.JSchUnknownHostKeyException
 import com.jcraft.jsch.KeyPair
 import com.jcraft.jsch.Session
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.jstasks.HeadlessJsTaskConfig
+import com.facebook.react.jstasks.HeadlessJsTaskContext
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
@@ -22,6 +27,8 @@ import java.util.concurrent.Executors
 private const val CONNECT_TIMEOUT_MS = 15_000
 private const val CHANNEL_TIMEOUT_MS = 10_000
 private const val DEFAULT_EXEC_TIMEOUT_MS = 120_000
+/** Must match KEEP_ALIVE_TASK in index.ts. */
+private const val KEEP_ALIVE_TASK = "HerdrKeepAlive"
 
 // SSH_MSG_CHANNEL_OPEN_FAILURE reason codes (RFC 4254 §5.1).
 private const val OPEN_ADMINISTRATIVELY_PROHIBITED = 1
@@ -36,6 +43,8 @@ class HerdrSshModule : Module() {
   private val io = Executors.newCachedThreadPool()
   private val sessions = ConcurrentHashMap<String, Session>()
   private val channels = ConcurrentHashMap<String, StreamChannel>()
+  /** The headless JS task held while monitoring; touched on the UI thread only. */
+  private var keepAliveTask: Int? = null
 
   override fun definition() = ModuleDefinition {
     Name("HerdrSsh")
@@ -179,6 +188,7 @@ class HerdrSshModule : Module() {
 
     Function("startMonitoring") { text: String ->
       appContext.reactContext?.let { MonitorService.start(it, text) }
+      holdTimers(true)
     }
 
     // FLAG_SECURE: keeps app content out of screenshots, screen recording and the recents preview.
@@ -193,13 +203,35 @@ class HerdrSshModule : Module() {
 
     Function("stopMonitoring") {
       appContext.reactContext?.let { MonitorService.stop(it) }
+      holdTimers(false)
     }
 
     OnDestroy {
       appContext.reactContext?.let { MonitorService.stop(it) }
+      holdTimers(false)
       channels.values.forEach { it.channel.disconnect() }
       sessions.values.forEach { it.disconnect() }
       io.shutdownNow()
+    }
+  }
+
+  /**
+   * React Native pauses JS timers while the activity is in the background unless a headless JS
+   * task is running. Holding one while monitoring keeps retries, reconnects and snapshot
+   * refreshes working in the background, not only native events.
+   */
+  private fun holdTimers(on: Boolean) {
+    val context = appContext.reactContext as? ReactContext ?: return
+    UiThreadUtil.runOnUiThread {
+      val tasks = HeadlessJsTaskContext.getInstance(context)
+      val id = keepAliveTask
+      if (on && (id == null || !tasks.isTaskRunning(id))) {
+        if (!context.hasActiveReactInstance()) return@runOnUiThread
+        keepAliveTask = tasks.startTask(HeadlessJsTaskConfig(KEEP_ALIVE_TASK, Arguments.createMap(), 0, true))
+      } else if (!on && id != null) {
+        keepAliveTask = null
+        if (tasks.isTaskRunning(id)) tasks.finishTask(id)
+      }
     }
   }
 
@@ -224,7 +256,7 @@ class HerdrSshModule : Module() {
     session.setConfig("StrictHostKeyChecking", "yes")
     session.setConfig("HashKnownHosts", "no")
     // Detect dead links (e.g. after network changes) instead of hanging on a silent socket.
-    session.setServerAliveInterval(15_000)
+    session.setServerAliveInterval(10_000)
     session.setServerAliveCountMax(3)
     return session
   }

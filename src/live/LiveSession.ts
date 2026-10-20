@@ -32,6 +32,8 @@ export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline' | 'u
 export type LiveState = {
   status: LiveStatus;
   error?: string;
+  /** Code of the error behind `error`, e.g. `ERR_NO_SESSION` when the SSH session is gone. */
+  errorCode?: string;
   /** From `ping` on connect. */
   server?: ServerInfo;
   /** Event types this server rejected and that are no longer subscribed to. */
@@ -57,6 +59,8 @@ export type LiveOptions = {
   onAlert?: (a: AgentAlert) => void;
   /** Clock for status-change times; tests replace it. */
   now?: () => number;
+  /** Every failed request, so the owner can check whether the SSH session behind it still works. */
+  onRequestError?: (e: unknown) => void;
   /** Called when the user chooses to connect to a server older than the minimum. */
   onContinueAnyway?: (version?: string) => void;
 };
@@ -76,6 +80,8 @@ export class LiveSession {
   private refreshing: Promise<void> | null = null;
   private refreshAgain = false;
   private attempt = 0;
+  /** Bumped by retryNow(); work started by an earlier attempt can no longer change the state. */
+  private gen = 0;
   private stopped = false;
   /** Set by continueAnyway(): skip the version check. */
   private allowOld = false;
@@ -83,8 +89,8 @@ export class LiveSession {
   private dropped = new Set<string>();
   /** The first snapshot is a baseline: agents already blocked when we connect don't alert. */
   private baselined = false;
-  private readonly opts: Required<Omit<LiveOptions, 'onAlert' | 'onContinueAnyway'>> &
-    Pick<LiveOptions, 'onAlert' | 'onContinueAnyway'>;
+  private readonly opts: Required<Omit<LiveOptions, 'onAlert' | 'onContinueAnyway' | 'onRequestError'>> &
+    Pick<LiveOptions, 'onAlert' | 'onContinueAnyway' | 'onRequestError'>;
 
   constructor(
     private readonly open: () => Promise<HerdrClient>,
@@ -98,6 +104,7 @@ export class LiveSession {
       onAlert: opts.onAlert,
       now: opts.now ?? Date.now,
       onContinueAnyway: opts.onContinueAnyway,
+      onRequestError: opts.onRequestError,
     };
   }
 
@@ -156,11 +163,21 @@ export class LiveSession {
     this.retryNow();
   }
 
-  /** Forces a reconnect (e.g. after the user taps Retry). */
+  /**
+   * Forces a reconnect (e.g. after the user taps Retry, or over a new SSH session). The old
+   * subscription and any read or connect still in flight belong to the previous attempt: their
+   * late failures are ignored instead of knocking the new attempt back to reconnecting.
+   */
   retryNow(): void {
     if (this.stopped) return;
     this.attempt = 0;
+    this.gen++;
     this.clearTimers();
+    const old = this.sub;
+    this.sub = null;
+    this.subscribedPanes = '';
+    old?.close();
+    this.refreshing = null;
     void this.connect();
   }
 
@@ -169,25 +186,33 @@ export class LiveSession {
    * stay open), so every request gets its own connection. Reusing one races the server's EOF.
    */
   private async withConnection<T>(fn: (c: HerdrClient) => Promise<T>): Promise<T> {
-    const c = await this.open();
     try {
-      return await fn(c);
-    } finally {
-      c.close();
+      const c = await this.open();
+      try {
+        return await fn(c);
+      } finally {
+        c.close();
+      }
+    } catch (e) {
+      this.opts.onRequestError?.(e);
+      throw e;
     }
   }
 
   private async connect(): Promise<void> {
+    const gen = this.gen;
     try {
       const server = await this.withConnection(ping);
-      if (this.stopped) return;
-      this.update({ server });
+      if (this.stopped || gen !== this.gen) return;
+      // The SSH session works again; a stale code would make the owner replace it once more.
+      this.update({ server, errorCode: undefined });
       if (!this.allowOld) checkVersion(server);
       await this.resubscribe(this.paneIds(this.state.snapshot));
+      if (gen !== this.gen) return;
       await this.refresh();
-      this.attempt = 0;
+      if (gen === this.gen) this.attempt = 0;
     } catch (e) {
-      this.handleFailure(e);
+      if (gen === this.gen) this.handleFailure(e);
     }
   }
 
@@ -221,6 +246,7 @@ export class LiveSession {
   }
 
   private async subscribeOnce(panes: string[]): Promise<void> {
+    const gen = this.gen;
     const client = await this.open();
     client.onEvent((e) => this.handleEvent(client, e));
     client.onStreamError((err) => {
@@ -236,7 +262,7 @@ export class LiveSession {
       client.close();
       throw e;
     }
-    if (this.stopped) {
+    if (this.stopped || gen !== this.gen) {
       client.close();
       return;
     }
@@ -270,7 +296,8 @@ export class LiveSession {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      this.refresh().catch((e) => this.handleFailure(e));
+      const gen = this.gen;
+      this.refresh().catch((e) => gen === this.gen && this.handleFailure(e));
     }, this.opts.debounceMs);
   }
 
@@ -280,25 +307,27 @@ export class LiveSession {
       this.refreshAgain = true;
       return this.refreshing;
     }
-    this.refreshing = (async () => {
+    const gen = this.gen;
+    const run = (async () => {
       do {
         this.refreshAgain = false;
         const snapshot = await this.withConnection(fetchSnapshot);
-        if (this.stopped) return;
+        if (this.stopped || gen !== this.gen) return;
         const panes = this.paneIds(snapshot);
-        this.update({ status: 'live', error: undefined, snapshot, tree: buildTree(snapshot) });
+        this.update({ status: 'live', error: undefined, errorCode: undefined, snapshot, tree: buildTree(snapshot) });
         this.setAgents(agentsFromSnapshot(snapshot), this.baselined);
         this.baselined = true;
         if (panes.join(',') !== this.subscribedPanes) {
           await this.resubscribe(panes);
           this.refreshAgain = true; // Events between the read and the new subscription.
         }
-      } while (this.refreshAgain && !this.stopped);
+      } while (this.refreshAgain && !this.stopped && gen === this.gen);
     })();
+    this.refreshing = run;
     try {
-      await this.refreshing;
+      await run;
     } finally {
-      this.refreshing = null;
+      if (this.refreshing === run) this.refreshing = null;
     }
   }
 
@@ -319,22 +348,23 @@ export class LiveSession {
     const code = (e as { code?: string })?.code ?? '';
     const message = (e as { message?: string })?.message ?? String(e);
     if (this.opts.fatalCodes.includes(code)) {
-      this.update({ status: 'offline', error: message });
+      this.update({ status: 'offline', error: message, errorCode: code });
       return;
     }
     if (code === 'unsupported_version') {
-      this.update({ status: 'unsupported', error: message });
+      this.update({ status: 'unsupported', error: message, errorCode: code });
       return;
     }
     if (code === 'invalid_request') {
       // The same request would be rejected again; retrying only loops.
       this.update({
         status: 'unsupported',
+        errorCode: code,
         error: `Herdr on this server rejected a request from the app (${message.replace(/, expected .*$/s, '')}). Updating Herdr may fix this.`,
       });
       return;
     }
-    this.update({ status: 'reconnecting', error: message });
+    this.update({ status: 'reconnecting', error: message, errorCode: code });
     if (this.retryTimer) return;
     const delay = Math.min(this.opts.retryMs * 2 ** this.attempt, this.opts.maxRetryMs);
     this.attempt++;

@@ -11,6 +11,9 @@ export const liveLabel: Record<LiveStatus, [string, string]> = {
   unsupported: ['not supported', colors.danger],
 };
 
+/** The SSH session behind this view is gone: retrying the view can't help until it is replaced. */
+export const sessionLost = (st: LiveState) => st.status !== 'live' && st.errorCode === 'ERR_NO_SESSION';
+
 /** "● live · herdr 0.9.3" plus anything after it, e.g. the host. */
 export function LiveStatusLine({ st, testID, extra }: { st: LiveState; testID?: string; extra?: string }) {
   const [label, color] = liveLabel[st.status];
@@ -60,12 +63,12 @@ export function LiveBanner({
   return (
     <>
       {st.status !== 'live' && st.error ? <Text style={styles.muted}>{st.error}</Text> : null}
-      {st.status === 'reconnecting' ? (
+      {st.status === 'reconnecting' && !(sessionLost(st) && onReconnect) ? (
         <View style={{ marginTop: 8 }}>
           <Button testID={`retry-${session}`} label="Retry now" kind="secondary" onPress={() => live.retryNow()} />
         </View>
       ) : null}
-      {st.status === 'offline' && onReconnect ? (
+      {(st.status === 'offline' || sessionLost(st)) && onReconnect ? (
         <View style={{ marginTop: 8 }}>
           <Button testID="reconnect" label="Reconnect" onPress={onReconnect} />
         </View>

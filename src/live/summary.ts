@@ -13,8 +13,13 @@ export function agentSummary(maps: AgentMap[]): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-/** Text of the ongoing notification while connected to a server. */
-export function monitorText(server: string, maps: AgentMap[]): string {
+/**
+ * Text of the ongoing notification while connected to a server. While the SSH session is being
+ * replaced, agent statuses are stale and alerts can't arrive, so it says that instead.
+ */
+export function monitorText(server: string, maps: AgentMap[], link: 'up' | 'reconnecting' | 'waiting' | 'failed' = 'up'): string {
+  if (link === 'reconnecting') return `${server}: connection lost · reconnecting…`;
+  if (link !== 'up') return `${server}: disconnected · open the app to reconnect`;
   const s = agentSummary(maps);
   return s ? `${server}: ${s}` : `${server}: no agents busy`;
 }

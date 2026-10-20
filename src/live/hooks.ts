@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 import type { LiveSession, LiveState } from './LiveSession';
 import { PaneReader, type PaneOutput } from './PaneReader';
@@ -38,9 +39,16 @@ export function usePaneOutput(live: LiveSession, paneId: string) {
     [live, paneId],
   );
 
+  // Polling is for the screen. Timers keep running in the background while monitoring, so pause
+  // there instead of reading the pane every second for nobody.
   useEffect(() => {
-    reader.start();
-    return () => reader.stop();
+    const sync = (s: AppStateStatus) => (s === 'background' ? reader.stop() : reader.start());
+    sync(AppState.currentState);
+    const sub = AppState.addEventListener('change', sync);
+    return () => {
+      sub.remove();
+      reader.stop();
+    };
   }, [reader]);
 
   return { output, error, reader };

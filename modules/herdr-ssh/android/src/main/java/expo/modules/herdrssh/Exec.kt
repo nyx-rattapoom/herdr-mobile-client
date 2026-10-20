@@ -29,7 +29,8 @@ object Exec {
       channel.setCommand(command)
       val stdout = channel.inputStream
       val stderr = channel.errStream
-      channel.connect(CONNECT_TIMEOUT_MS)
+      // Within the deadline: on a link that stopped answering, opening the channel is what hangs.
+      channel.connect(minOf(deadline, CONNECT_TIMEOUT_MS.toLong()).toInt())
       outFuture = io.submit<String> { readLimited(stdout) }
       errFuture = io.submit<String> { readLimited(stderr) }
       val start = System.nanoTime()

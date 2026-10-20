@@ -133,6 +133,63 @@ describe('LiveSession', () => {
     live.stop();
   });
 
+  it('keeps retrying a lost SSH session when that is not fatal, and reports each failure', async () => {
+    const server = new FakeHerdr((t) => new HerdrClient(t, 60_000));
+    server.handlers['events.subscribe'] = () => ({ type: 'subscription_started' });
+    server.handlers['session.snapshot'] = () => snap(['w1:p1']);
+    const errors: unknown[] = [];
+    const live = new LiveSession(server.open, { retryMs: 100, fatalCodes: [], onRequestError: (e) => errors.push(e) });
+    server.failOpen = { code: 'ERR_NO_SESSION', message: 'connection lost' };
+    await live.start();
+    expect(live.getState()).toMatchObject({ status: 'reconnecting', errorCode: 'ERR_NO_SESSION' });
+    expect(errors).toEqual([expect.objectContaining({ code: 'ERR_NO_SESSION' })]);
+    server.failOpen = null;
+    // Cleared as soon as the session answers again, before the view is live.
+    const codes: (string | undefined)[] = [];
+    live.subscribe((s) => s.server && codes.push(s.errorCode));
+    await settle(500);
+    expect(codes[0]).toBeUndefined();
+    expect(live.getState()).toMatchObject({ status: 'live', errorCode: undefined });
+    live.stop();
+  });
+
+  it('ignores late failures from before retryNow(), so a new SSH session stays live', async () => {
+    const { server } = setup();
+    // The first ping hangs on a dead SSH session and fails only after the retry succeeded.
+    let failOld!: (e: unknown) => void;
+    let first = true;
+    const open = () => {
+      if (!first) return server.open();
+      first = false;
+      return new Promise<HerdrClient>((_, reject) => (failOld = reject));
+    };
+    const live = new LiveSession(open, { debounceMs: 50, retryMs: 100 });
+    void live.start();
+    live.retryNow();
+    await settle(200);
+    expect(live.getState().status).toBe('live');
+    failOld(Object.assign(new Error('connection lost'), { code: 'ERR_NO_SESSION' }));
+    await settle(200);
+    expect(live.getState().status).toBe('live');
+    live.stop();
+  });
+
+  it('drops the old subscription on retryNow(), so its close does not start another reconnect', async () => {
+    const { server, live } = setup();
+    void live.start();
+    await settle(200);
+    const old = server.subscriptions[server.subscriptions.length - 1];
+    live.retryNow();
+    expect(old.closed).toBe(true);
+    old.serverClose('connection lost');
+    await settle(200);
+    expect(live.getState().status).toBe('live');
+    const count = server.subscriptions.length;
+    await settle(2_000);
+    expect(server.subscriptions.length).toBe(count);
+    live.stop();
+  });
+
   it('request() refreshes the tree afterwards; query() does not', async () => {
     const { server, live } = setup();
     server.handlers['tab.create'] = () => ({ type: 'tab_created' });

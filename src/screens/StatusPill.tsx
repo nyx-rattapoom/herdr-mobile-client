@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text } from 'react-native';
+import { AppState, Pressable, Text } from 'react-native';
 
 import { useLive } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import { pillFor, type PillKind } from '../live/pill';
+import { sessionLost } from './LiveBanner';
 import { colors } from './ui';
 
 const tone: Record<PillKind, { bg: string; fg: string }> = {
@@ -31,7 +32,13 @@ export function StatusPill({
   const agent = st.agents.get(paneId)?.status;
   const since = st.since.get(paneId);
   const [now, setNow] = useState(() => Date.now());
-  const ticking = st.status === 'live' && agent === 'working' && Boolean(since);
+  // Timers keep running in the background while monitoring; don't tick for nobody there.
+  const [foreground, setForeground] = useState(AppState.currentState !== 'background');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setForeground(s !== 'background'));
+    return () => sub.remove();
+  }, []);
+  const ticking = foreground && st.status === 'live' && agent === 'working' && Boolean(since);
   useEffect(() => {
     if (!ticking) return;
     const tick = () => setNow(Date.now());
@@ -50,7 +57,7 @@ export function StatusPill({
       testID={`pill-${pill.kind}`}
       accessibilityRole={pill.retry ? 'button' : 'text'}
       disabled={!pill.retry}
-      onPress={() => (st.status === 'offline' && onReconnect ? onReconnect() : live.retryNow())}
+      onPress={() => ((st.status === 'offline' || sessionLost(st)) && onReconnect ? onReconnect() : live.retryNow())}
       style={{
         position: 'absolute',
         top: 8,
