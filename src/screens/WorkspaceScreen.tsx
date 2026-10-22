@@ -203,6 +203,7 @@ export function WorkspaceScreen(p: Props) {
               live={p.live}
               paneId={pane.pane_id}
               agent={st.agents.get(pane.pane_id)?.agent ?? pane.agent}
+              agentStatus={st.agents.get(pane.pane_id)?.status}
               footer={p.footer ? (poke, blank, screen) => p.footer?.(pane.pane_id, poke, blank, screen) : undefined}
               overlay={(poke) => (
                 <>

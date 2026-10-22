@@ -15,6 +15,7 @@ import { layoutLine, type GridLine } from '../live/grid';
 import { usePaneOutput } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import type { PaneOutput } from '../live/PaneReader';
+import { EMPTY_KEPT, keepScrolledOff, shownRows, type Kept } from '../live/scrollback';
 import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
 import { ErrorBox, colors, styles } from './ui';
 
@@ -26,6 +27,15 @@ type ScrollMemory = { y: number; follow: boolean };
 /** Where each pane was scrolled to, so switching back (or reconnecting) keeps the position. */
 const scrollMemory = new WeakMap<LiveSession, Map<string, ScrollMemory>>();
 const PAD = 8;
+/** Rows each full-screen agent scrolled off its screen while watched, kept across tab switches. */
+const keptRows = new WeakMap<LiveSession, Map<string, { agent: string; kept: Kept }>>();
+/** Kept rows are laid out once, not on every poll. */
+const laidOut = new WeakMap<Line, GridLine>();
+const layoutKept = (l: Line) => {
+  let g = laidOut.get(l);
+  if (!g) laidOut.set(l, (g = layoutLine(l, TERM_FG, TERM_BG)));
+  return g;
+};
 
 /** A one-off read of a full-screen agent's own transcript (see `PaneReader.loadHistory`). */
 export type History =
@@ -42,6 +52,7 @@ export type Header =
   | 'load-more'
   | 'start'
   | 'load-history'
+  | 'history-busy'
   | 'history-loading'
   | 'history-none'
   | 'history-failed'
@@ -49,13 +60,15 @@ export type Header =
 
 /**
  * What the list header offers. A full-screen agent (Claude Code, OpenCode) draws on the alternate
- * screen, so an untruncated read is its screen, not the start of its history.
+ * screen, so an untruncated read is its screen, not the start of its history. Herdr reads that
+ * history only from an idle agent; while it is `busy` (working or asking) it returns the screen.
  */
-export function scrollbackHeader(output: PaneOutput | null, agent: boolean, history: History): Header {
+export function scrollbackHeader(output: PaneOutput | null, agent: boolean, history: History, busy = false): Header {
   if (history.kind === 'shown') return 'history-shown';
   if (!output) return 'loading';
   if (output.truncated) return 'load-more';
   if (!agent) return 'start';
+  if (busy && (history.kind === 'idle' || history.kind === 'none')) return 'history-busy';
   return history.kind === 'idle' ? 'load-history' : `history-${history.kind}`;
 }
 
@@ -78,6 +91,8 @@ type Props = {
   paneId: string;
   /** The pane's agent, if any; full-screen agents keep history outside the terminal's scrollback. */
   agent?: string;
+  /** Herdr's status for the agent (`working`, `blocked`, …). */
+  agentStatus?: string;
   /** Rendered under the output (M3 input bar). */
   /** `blank`: output was read and nothing is drawn yet. */
   /** `screen`: the parsed output lines, for reading what the agent asks. */
@@ -87,7 +102,7 @@ type Props = {
 };
 
 /** A pane's output, followed live, with an optional footer (the composer). */
-export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
+export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: Props) {
   const { output, error, reader } = usePaneOutput(live, paneId);
   const parsed = useMemo(() => parseOutput(output?.text ?? ''), [output?.text]);
   /** The latest screen, for a history read that finishes renders after it was requested. */
@@ -97,9 +112,28 @@ export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
   }, [parsed]);
   const lines = useMemo(() => parsed.map((l) => layoutLine(l, TERM_FG, TERM_BG)), [parsed]);
   const blank = output !== null && lines.every((l) => l.items.length === 0 && l.bg.length === 0);
+  // An agent's untruncated read is its screen; what scrolls off it is kept above.
+  const tracking = !!agent && output !== null && !output.truncated;
+  const kept = useMemo(() => {
+    let m = keptRows.get(live);
+    if (!m) keptRows.set(live, (m = new Map()));
+    const was = m.get(paneId);
+    // Another agent in the pane starts over.
+    const k = was && was.agent === agent ? was.kept : EMPTY_KEPT;
+    if (!tracking || !agent) return k;
+    // Merging the same screen again changes nothing, so a repeated render is harmless.
+    const next = keepScrolledOff(k, parsed);
+    m.set(paneId, { agent, kept: next });
+    return next;
+  }, [live, paneId, agent, tracking, parsed]);
+  const keptLines = useMemo(() => (tracking ? shownRows(kept).map(layoutKept) : []), [tracking, kept]);
   const [history, setHistory] = useState<History>({ kind: 'idle' });
-  const shown = history.kind === 'shown' ? history.lines : lines;
-  const header = scrollbackHeader(output, !!agent, history);
+  const shown = useMemo(
+    () => (history.kind === 'shown' ? history.lines : keptLines.length ? [...keptLines, ...lines] : lines),
+    [history, keptLines, lines],
+  );
+  const busy = agentStatus === 'working' || agentStatus === 'blocked';
+  const header = scrollbackHeader(output, !!agent, history, busy);
   const cols = useMemo(() => shown.reduce((n, l) => Math.max(n, l.cols), 0), [shown]);
   const { metrics, probe } = useCellMetrics(FONT_SIZE);
   const { width: screenWidth } = useWindowDimensions();
@@ -112,6 +146,19 @@ export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
   const restore = useRef(saved && !saved.follow ? saved.y : null);
 
   const viewport = useRef(0);
+  const offsetY = useRef(0);
+  const dropped = useRef(kept.dropped);
+  useEffect(() => {
+    // Kept rows dropped at their cap move everything up; a reader keeps their place.
+    const n = kept.dropped - dropped.current;
+    dropped.current = kept.dropped;
+    if (n <= 0 || follow || history.kind === 'shown') return;
+    // A position still to restore moves with the rows; otherwise the list does.
+    if (restore.current !== null) restore.current = Math.max(0, restore.current - n * metrics.h);
+    else list.current?.scrollToOffset({ offset: Math.max(0, offsetY.current - n * metrics.h), animated: false });
+    // Only a new drop should move the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept.dropped]);
   useEffect(() => {
     // Give up waiting for the list to grow; restore as far as it goes.
     const t = setTimeout(() => {
@@ -156,9 +203,10 @@ export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
   };
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    offsetY.current = contentOffset.y;
     // Until a saved position is restored, scroll events come from the list growing.
     if (restore.current !== null) return;
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     const atEnd = contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
     setFollow(atEnd);
     // A history snapshot isn't restored on return, so its position isn't remembered.
@@ -216,6 +264,7 @@ export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
                 <ListHeader
                   header={header}
                   lines={output?.lines ?? 0}
+                  kept={keptLines.length}
                   partial={history.kind === 'shown' && history.partial}
                   onLoadMore={() => reader?.loadMore()}
                   onLoadHistory={() => void loadHistory()}
@@ -253,6 +302,8 @@ export function PaneView({ live, paneId, agent, footer, overlay }: Props) {
 type HeaderProps = {
   header: Header;
   lines: number;
+  /** Rows kept from what scrolled off an agent's screen, shown above it. */
+  kept: number;
   partial: boolean;
   onLoadMore: () => void;
   onLoadHistory: () => void;
@@ -260,7 +311,7 @@ type HeaderProps = {
 };
 
 /** One line, so it fits the fixed header height at any font scale. */
-function ListHeader({ header, lines, partial, onLoadMore, onLoadHistory, onBackToLive }: HeaderProps) {
+function ListHeader({ header, lines, kept, partial, onLoadMore, onLoadHistory, onBackToLive }: HeaderProps) {
   const muted = [styles.muted, { textAlign: 'center' as const }];
   const link = [styles.muted, { color: colors.accent, textAlign: 'center' as const }];
   switch (header) {
@@ -281,13 +332,21 @@ function ListHeader({ header, lines, partial, onLoadMore, onLoadHistory, onBackT
         <Pressable testID="load-history" onPress={onLoadHistory}>
           <Text style={muted} numberOfLines={1}>
             {header === 'load-history'
-              ? 'Start of output · '
+              ? kept > 0
+                ? 'Earlier output not loaded · '
+                : 'Start of output · '
               : header === 'history-none'
                 ? 'No older agent history · '
                 : "Couldn't load history · "}
             <Text style={{ color: colors.accent }}>{header === 'load-history' ? 'Load agent history' : 'Retry'}</Text>
           </Text>
         </Pressable>
+      );
+    case 'history-busy':
+      return (
+        <Text testID="history-busy" style={muted} numberOfLines={1}>
+          {kept > 0 ? 'Earlier output loads when the agent is idle' : 'Agent history loads when the agent is idle'}
+        </Text>
       );
     case 'history-loading':
       return <Text style={muted}>Loading agent history…</Text>;

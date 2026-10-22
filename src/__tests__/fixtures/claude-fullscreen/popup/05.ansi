@@ -1,0 +1,40 @@
+  item 110
+  item 111
+  item 112
+  item 113
+  item 114
+  item 115
+  item 116
+  item 117
+  item 118
+  item 119
+  item 120
+
+  [0m[38;2;153;153;153mListed [0m[1m[38;2;153;153;153m1[0m[38;2;153;153;153m directory [0m
+
+[0m[38;2;255;255;255m⏺ [0mI replied with items 1 through 120, then ran [0m[38;2;177;185;249mls -la[0m. The directory is empty apart from [0m[38;2;177;185;249m. [0mand [0m[38;2;177;185;249m..[0m.
+
+[0m[38;2;153;153;153m✻ Brewed for 7s · done 12:39 AM[0m
+
+[0m[38;2;153;153;153m[48;2;55;55;55m❯ [0m[38;2;255;255;255m[48;2;55;55;55mReply with the lines 'row 1' through 'row 150', one per line, as plain text (no code block). Then use the Bash tool [0m[48;2;55;55;55m [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mto run: touch made.txt[0m[48;2;55;55;55m                                                                                               [0m
+
+[0m[38;2;153;153;153m⏺ [0mCreating empty file made.txt
+[0m[38;2;153;153;153m  ⎿  $ touch made.txt[0m
+
+[0m[38;2;177;185;249m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ [0m[1m[38;2;177;185;249mBash command[0m
+ [0m[1mTip: auto mode handles these prompts for you — choose "switch to auto mode" below[0m
+ [0m[38;2;153;153;153mCreate empty file made.txt[0m
+[0m[38;2;80;80;80m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌[0m
+ touch made.txt
+[0m[38;2;80;80;80m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌[0m
+ Do you want to proceed?
+ [0m[38;2;177;185;249m❯[0m [0m[38;2;153;153;153m1. [0m[38;2;177;185;249mYes[0m
+   [0m[38;2;153;153;153m2. [0mYes, and always allow access to
+      [0m[1m/home/me/demo[0m from
+      this project
+   [0m[38;2;153;153;153m3. [0mYes, and switch to auto mode[0m[38;2;153;153;153m · auto mode handles these prompts for you[0m
+   [0m[38;2;153;153;153m4. [0mNo
+
+ [0m[38;2;153;153;153mEsc to cancel · Tab to amend[0m
