@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { Pressable, Text } from 'react-native';
+import { FlatList, Pressable, Text } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { LiveSession } from '../live/LiveSession';
@@ -174,6 +174,88 @@ describe('PaneView kept rows', () => {
       });
     }
     expect(r!.root.findByProps({ testID: 'pane-output' }).props.data).toHaveLength(40);
+    act(() => r!.unmount());
+  });
+});
+
+describe('PaneView following the end', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  const scrolled = (y: number) => ({
+    nativeEvent: { contentOffset: { y }, contentSize: { height: 2000 }, layoutMeasurement: { height: 500 } },
+  });
+
+  it('keeps following through its own scrolls, and stops only when the reader scrolls away', async () => {
+    const query = jest.fn(async () => ({ read: { text: 'a\nb\n', truncated: false } }));
+    const live = { query } as unknown as LiveSession;
+    let r: ReactTestRenderer | undefined;
+    await act(async () => {
+      r = create(<PaneView live={live} paneId="w1:p4" agent="claude" />);
+    });
+    const list = () => r!.root.findByProps({ testID: 'pane-output' }).props;
+    const latest = () => r!.root.findAllByProps({ testID: 'jump-bottom' }).length > 0;
+    // An animated scroll to the end that falls short as the output grows.
+    act(() => list().onScroll(scrolled(1200)));
+    expect(latest()).toBe(false);
+    act(() => list().onScrollBeginDrag());
+    act(() => list().onScroll(scrolled(900)));
+    act(() => list().onScrollEndDrag());
+    expect(latest()).toBe(true);
+    // Still not following while the fling carries on, and back once at the end.
+    act(() => list().onMomentumScrollBegin());
+    act(() => list().onScroll(scrolled(800)));
+    act(() => list().onMomentumScrollEnd());
+    expect(latest()).toBe(true);
+    act(() => list().onScroll(scrolled(1500)));
+    expect(latest()).toBe(false);
+    act(() => r!.unmount());
+  });
+
+  it('follows again after ↓ Latest even when a fling never reported its end', async () => {
+    const query = jest.fn(async () => ({ read: { text: 'a\nb\n', truncated: false } }));
+    const live = { query } as unknown as LiveSession;
+    let r: ReactTestRenderer | undefined;
+    await act(async () => {
+      r = create(<PaneView live={live} paneId="w1:p5" agent="claude" />);
+    });
+    const list = () => r!.root.findByProps({ testID: 'pane-output' }).props;
+    const latest = () => r!.root.findAllByProps({ testID: 'jump-bottom' }).length > 0;
+    act(() => list().onScrollBeginDrag());
+    act(() => list().onScroll(scrolled(900)));
+    act(() => list().onScrollEndDrag());
+    // The fling is cut short and onMomentumScrollEnd never comes.
+    act(() => list().onMomentumScrollBegin());
+    act(() => r!.root.findByProps({ testID: 'jump-bottom' }).props.onPress());
+    expect(latest()).toBe(false);
+    // The scroll to the end falls short as the output grows: still following.
+    act(() => list().onScroll(scrolled(1300)));
+    expect(latest()).toBe(false);
+    act(() => r!.unmount());
+  });
+
+  it("doesn't pull a drag in progress back to the end as the output grows", async () => {
+    const end = jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+    const query = jest.fn(async () => ({ read: { text: 'a\nb\n', truncated: false } }));
+    const live = { query } as unknown as LiveSession;
+    let r: ReactTestRenderer | undefined;
+    await act(async () => {
+      r = create(<PaneView live={live} paneId="w1:p3" agent="claude" />);
+    });
+    const list = () => r!.root.findByProps({ testID: 'pane-output' }).props;
+    end.mockClear();
+    act(() => list().onContentSizeChange(0, 1000));
+    expect(end).toHaveBeenCalledTimes(1);
+    act(() => list().onScrollBeginDrag());
+    act(() => list().onContentSizeChange(0, 1100));
+    expect(end).toHaveBeenCalledTimes(1);
+    act(() => list().onScrollEndDrag());
+    act(() => list().onContentSizeChange(0, 1200));
+    expect(end).toHaveBeenCalledTimes(2);
     act(() => r!.unmount());
   });
 });

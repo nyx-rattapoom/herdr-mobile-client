@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -27,6 +27,7 @@ type ScrollMemory = { y: number; follow: boolean };
 /** Where each pane was scrolled to, so switching back (or reconnecting) keeps the position. */
 const scrollMemory = new WeakMap<LiveSession, Map<string, ScrollMemory>>();
 const PAD = 8;
+const rowKey = (_: GridLine, i: number) => String(i);
 /** Rows each full-screen agent scrolled off its screen while watched, kept across tab switches. */
 const keptRows = new WeakMap<LiveSession, Map<string, { agent: string; kept: Kept }>>();
 /** Kept rows are laid out once, not on every poll. */
@@ -112,6 +113,8 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
   }, [parsed]);
   const lines = useMemo(() => parsed.map((l) => layoutLine(l, TERM_FG, TERM_BG)), [parsed]);
   const blank = output !== null && lines.every((l) => l.items.length === 0 && l.bg.length === 0);
+  const [saved] = useState(() => scrollMemory.get(live)?.get(paneId));
+  const [follow, setFollow] = useState(saved?.follow ?? true);
   // An agent's untruncated read is its screen; what scrolls off it is kept above.
   const tracking = !!agent && output !== null && !output.truncated;
   const kept = useMemo(() => {
@@ -121,11 +124,12 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
     // Another agent in the pane starts over.
     const k = was && was.agent === agent ? was.kept : EMPTY_KEPT;
     if (!tracking || !agent) return k;
-    // Merging the same screen again changes nothing, so a repeated render is harmless.
-    const next = keepScrolledOff(k, parsed);
+    // Merging the same screen again changes nothing, so a repeated render is harmless. Rows aren't
+    // dropped at the cap under someone reading back.
+    const next = keepScrolledOff(k, parsed, !follow);
     m.set(paneId, { agent, kept: next });
     return next;
-  }, [live, paneId, agent, tracking, parsed]);
+  }, [live, paneId, agent, tracking, parsed, follow]);
   const keptLines = useMemo(() => (tracking ? shownRows(kept).map(layoutKept) : []), [tracking, kept]);
   const [history, setHistory] = useState<History>({ kind: 'idle' });
   const shown = useMemo(
@@ -140,13 +144,23 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
   // Rows keep the pane's own width; a pane wider than the phone scrolls sideways instead of wrapping.
   const contentWidth = Math.max(screenWidth, Math.ceil(cols * metrics.w) + PAD * 2);
   const list = useRef<FlatList<GridLine>>(null);
-  const [saved] = useState(() => scrollMemory.get(live)?.get(paneId));
-  const [follow, setFollow] = useState(saved?.follow ?? true);
+  // Stable, so rows that didn't change aren't drawn again on every poll.
+  const renderRow = useCallback(({ item }: { item: GridLine }) => <TermRow g={item} m={metrics} />, [metrics]);
+  const rowLayout = useCallback(
+    (_: unknown, index: number) => ({ length: metrics.h, offset: PAD + HEADER_H + index * metrics.h, index }),
+    [metrics.h],
+  );
   /** A saved position still to restore once the list has laid out. */
   const restore = useRef(saved && !saved.follow ? saved.y : null);
 
   const viewport = useRef(0);
   const offsetY = useRef(0);
+  /** A finger is on the list; following the end must not pull it back mid-drag. */
+  const dragging = useRef(false);
+  /** The list is still moving after a fling. */
+  const flinging = useRef(false);
+  const following = useRef(follow);
+  following.current = follow;
   const dropped = useRef(kept.dropped);
   useEffect(() => {
     // Kept rows dropped at their cap move everything up; a reader keeps their place.
@@ -188,6 +202,10 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
 
   const backToLive = () => {
     restore.current = null;
+    // A fling cut short by a scroll never reports its end; it mustn't outlive the jump back.
+    dragging.current = false;
+    flinging.current = false;
+    following.current = true;
     setFollow(true);
     // Leaving the snapshot changes the content; onContentSizeChange then follows to the end.
     if (history.kind === 'shown') setHistory({ kind: 'idle' });
@@ -208,12 +226,17 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
     // Until a saved position is restored, scroll events come from the list growing.
     if (restore.current !== null) return;
     const atEnd = contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
-    setFollow(atEnd);
+    // Only the reader leaves the end. The list's own scrolls (following, ↓ Latest, rows dropped at
+    // the cap) can fall short while the output grows, and must not stop it following.
+    if (atEnd) flinging.current = false;
+    const next = atEnd || (following.current && !dragging.current && !flinging.current);
+    following.current = next;
+    setFollow(next);
     // A history snapshot isn't restored on return, so its position isn't remembered.
     if (history.kind === 'shown') return;
     let m = scrollMemory.get(live);
     if (!m) scrollMemory.set(live, (m = new Map()));
-    m.set(paneId, { y: contentOffset.y, follow: atEnd });
+    m.set(paneId, { y: contentOffset.y, follow: next });
   };
 
   const onContentSizeChange = (_w: number, h: number) => {
@@ -223,7 +246,7 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
         list.current?.scrollToOffset({ offset: restore.current, animated: false });
         restore.current = null;
       }
-    } else if (follow) {
+    } else if (follow && !dragging.current) {
       list.current?.scrollToEnd({ animated: false });
     }
   };
@@ -248,16 +271,23 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
             style={{ flex: 1, width: contentWidth }}
             contentContainerStyle={{ padding: PAD }}
             data={shown}
-            keyExtractor={(_, i) => String(i)}
-            renderItem={({ item }) => <TermRow g={item} m={metrics} />}
+            keyExtractor={rowKey}
+            renderItem={renderRow}
             onScroll={onScroll}
+            onScrollBeginDrag={() => {
+              dragging.current = true;
+              flinging.current = false;
+            }}
+            onScrollEndDrag={() => (dragging.current = false)}
+            onMomentumScrollBegin={() => (flinging.current = true)}
+            onMomentumScrollEnd={() => (flinging.current = false)}
             scrollEventThrottle={100}
             onContentSizeChange={onContentSizeChange}
             onLayout={(e) => (viewport.current = e.nativeEvent.layout.height)}
             initialNumToRender={60}
             windowSize={15}
             // Fixed row heights let the list jump straight to a saved offset.
-            getItemLayout={(_, index) => ({ length: metrics.h, offset: PAD + HEADER_H + index * metrics.h, index })}
+            getItemLayout={rowLayout}
             ListHeaderComponent={
               // Screen-wide, so a pane wider than the phone doesn't push the header off to the right.
               <View style={{ height: HEADER_H, width: screenWidth - PAD * 2, justifyContent: 'center' }}>

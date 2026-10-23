@@ -5,6 +5,7 @@ import { lineText, parseAnsi, type Line } from '../live/ansi';
 import {
   EMPTY_KEPT,
   GAP_ROW,
+  MAX_HELD_ROWS,
   MAX_KEPT_ROWS,
   keepScrolledOff,
   rowKeys,
@@ -25,7 +26,8 @@ const frames = (name: string) =>
   readdirSync(join(dir, name))
     .sort()
     .map((f) => read(readFileSync(join(dir, name, f), 'utf8')));
-const replay = (screens: Line[][], from: Kept = EMPTY_KEPT) => screens.reduce(keepScrolledOff, from);
+const replay = (screens: Line[][], from: Kept = EMPTY_KEPT, hold = false) =>
+  screens.reduce((k, s) => keepScrolledOff(k, s, hold), from);
 const texts = (rows: Line[]) => rows.map((r) => lineText(r).trimEnd());
 const screen = (rows: string[]) => rows.map((t): Line => (t ? [{ text: t, style: {} }] : []));
 
@@ -159,6 +161,26 @@ describe('keepScrolledOff', () => {
     const k = replay([view(1), view(3), view(1, 12)]);
     expect(texts(k.rows)).toEqual(['line 1', 'line 2']);
     expect(texts(keepScrolledOff(k, view(2, 12)).rows)).toEqual(['line 1', 'line 2', 'line 1']);
+  });
+
+  it("doesn't drop rows under someone reading back until they return to the end", () => {
+    let k = replay([view(1)]);
+    let from = 1;
+    while (k.rows.length <= MAX_KEPT_ROWS) k = keepScrolledOff(k, view((from += 8)), true);
+    expect(k.dropped).toBe(0);
+    // Back at the end: the next rows that scroll off drop the oldest.
+    const back = keepScrolledOff(k, view(from + 8));
+    expect(back.rows.length).toBe(k.rows.length + 8 - back.dropped);
+    expect(back.dropped).toBeGreaterThan(0);
+    expect(back.rows.length).toBeLessThanOrEqual(MAX_KEPT_ROWS);
+    expect(back.gap).toBeNull();
+  });
+
+  it('drops while held only past the larger cap', () => {
+    let k = replay([view(1)]);
+    for (let from = 9; from <= MAX_HELD_ROWS + 9; from += 8) k = keepScrolledOff(k, view(from), true);
+    expect(k.dropped).toBeGreaterThan(0);
+    expect(k.rows.length).toBeLessThanOrEqual(MAX_HELD_ROWS);
   });
 
   it('drops the oldest rows at the cap and counts them', () => {

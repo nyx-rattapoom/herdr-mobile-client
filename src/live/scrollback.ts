@@ -31,6 +31,8 @@ export const GAP_ROW: Line = [
   { text: '  ⋯ the screen changed between reads; some output may be missing', style: { fg: '#888888' } },
 ];
 export const MAX_KEPT_ROWS = 3000;
+/** While someone reads back (`hold`), rows are dropped only past this, so what they read stays put. */
+export const MAX_HELD_ROWS = MAX_KEPT_ROWS * 2;
 /** Dropped together at the cap, so the list doesn't shift on every poll. */
 const DROP_ROWS = 500;
 
@@ -150,11 +152,12 @@ function pinnedBottom(a: string[], b: string[], last: number): number | null {
   return start === null ? null : b.length - start;
 }
 
-function append(kept: Kept, add: Line[], next: Line[], change: Partial<Kept>): Kept {
+function append(kept: Kept, add: Line[], next: Line[], change: Partial<Kept>, hold: boolean): Kept {
   let rows = add.length ? [...kept.rows, ...add] : kept.rows;
   let dropped = kept.dropped;
-  if (rows.length > MAX_KEPT_ROWS) {
-    const n = rows.length - MAX_KEPT_ROWS + DROP_ROWS;
+  const max = hold ? MAX_HELD_ROWS : MAX_KEPT_ROWS;
+  if (rows.length > max) {
+    const n = rows.length - max + DROP_ROWS;
     rows = rows.slice(n);
     dropped += n;
   }
@@ -173,8 +176,11 @@ export function shownRows(kept: Kept): Line[] {
   return kept.above > 0 ? kept.rows.slice(0, Math.max(0, kept.rows.length - kept.above)) : kept.rows;
 }
 
-/** Merges the next screen of a full-screen agent, keeping the rows that left its top. */
-export function keepScrolledOff(kept: Kept, next: Line[]): Kept {
+/**
+ * Merges the next screen of a full-screen agent, keeping the rows that left its top. `hold`: someone
+ * is reading back, so the oldest rows aren't dropped at the cap until they return to the end.
+ */
+export function keepScrolledOff(kept: Kept, next: Line[], hold = false): Kept {
   const prev = kept.screen;
   if (!prev || prev.length !== next.length) return { ...kept, screen: next, above: 0, gap: null };
   const a = rowKeys(prev);
@@ -182,7 +188,7 @@ export function keepScrolledOff(kept: Kept, next: Line[]): Kept {
   const gap = kept.gap;
   if (gap && gap.dropped === kept.dropped && cameBack(rowKeys(gap.screen), b, kept.pinned)) {
     const rows = kept.rows.slice(0, kept.rows.length - gap.rows);
-    return keepScrolledOff({ ...kept, rows, screen: gap.screen, gap: null }, next);
+    return keepScrolledOff({ ...kept, rows, screen: gap.screen, gap: null }, next, hold);
   }
   // Above the pinned rows, so they don't outweigh a big scroll's few overlapping rows.
   const end = kept.pinned > 0 && kept.pinned < a.length ? a.length - kept.pinned : a.length;
@@ -195,7 +201,7 @@ export function keepScrolledOff(kept: Kept, next: Line[]): Kept {
     for (let i = 0; i + up < a.length; i++) if (b[i] && b[i] === a[i + up] && b[i] !== a[i]) last = i;
     const pinned = pinnedBottom(a, b, last) ?? kept.pinned;
     const returning = Math.min(up, kept.above);
-    return append(kept, prev.slice(top + returning, top + up), next, { above: kept.above - returning, pinned });
+    return append(kept, prev.slice(top + returning, top + up), next, { above: kept.above - returning, pinned }, hold);
   }
   const { same, comparable } = inPlace(a, b);
   // Most rows unchanged in place: the agent redrew part of its screen without scrolling.
@@ -214,7 +220,7 @@ export function keepScrolledOff(kept: Kept, next: Line[]): Kept {
       const mostlyOld = (keys: string[]) => keys.filter((k) => old.has(k)).length * 2 > keys.length;
       if (!mostlyOld(before) && !mostlyOld(b.slice(top, end).filter((k) => k))) {
         const add = [...prev.slice(top, end), GAP_ROW];
-        const k = append(kept, add, next, { above: 0 });
+        const k = append(kept, add, next, { above: 0 }, hold);
         return { ...k, gap: { screen: prev, rows: add.length, dropped: k.dropped } };
       }
     }

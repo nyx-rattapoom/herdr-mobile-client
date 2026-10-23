@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { PixelRatio, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import type { Style } from '../live/ansi';
@@ -46,7 +46,9 @@ export function useCellMetrics(fontSize: number): {
         {PROBE}
       </Text>
     ) : null;
-  return { metrics: cellMetrics(fontSize, w ?? undefined), probe };
+  // One object per size: TermRow is memoized on it, and a list redraws every row when it changes.
+  const metrics = useMemo(() => cellMetrics(fontSize, w ?? undefined), [fontSize, w]);
+  return { metrics, probe };
 }
 
 function textStyle(s: Style, m: CellMetrics): TextStyle {
