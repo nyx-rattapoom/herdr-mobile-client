@@ -21,14 +21,12 @@ export class FakeTransport implements Transport {
   close() {
     this.closed = true;
   }
-  /** Simulates bytes arriving from the server. */
   push(chunk: string) {
     this.data(chunk);
   }
   serverClose(reason = 'eof') {
     this.close_(reason);
   }
-  /** Parsed request objects sent so far. */
   get requests(): { id: string; method: string; params: unknown }[] {
     return this.written.join('').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   }
@@ -50,17 +48,11 @@ export class MemoryKv implements KeyValueStore {
 
 type Handler = (params: Record<string, unknown>) => unknown;
 
-/**
- * In-memory Herdr server: each `open()` yields a HerdrClient over a FakeTransport whose
- * requests are answered by per-method handlers. Throwing `{code, message}` returns an error.
- */
 export class FakeHerdr {
   connections: FakeTransport[] = [];
   handlers: Record<string, Handler> = { ping: () => ({ type: 'pong', version: '0.9.3', protocol: 22 }) };
   failOpen: { code: string; message: string } | null = null;
-  /** Like Herdr: answer one request, then close the connection (subscriptions stay open). */
   oneRequestPerConnection = true;
-  /** Like Herdr before 0.8: an `invalid_request` error carries an empty id instead of the request's. */
   uncorrelatedInvalid = false;
 
   constructor(private readonly makeClient: (t: FakeTransport) => import('../protocol/client').HerdrClient) {}
@@ -74,7 +66,6 @@ export class FakeHerdr {
       await origWrite(d);
       for (const line of d.split('\n').filter(Boolean)) {
         const { id, method, params } = JSON.parse(line);
-        // Herdr reads only the first line of a connection; later ones are never answered.
         if (this.oneRequestPerConnection && answered) continue;
         answered = true;
         setTimeout(() => {
@@ -88,7 +79,6 @@ export class FakeHerdr {
             const uncorrelated = this.uncorrelatedInvalid && (e as { code?: string }).code === 'invalid_request';
             t.push(JSON.stringify({ id: uncorrelated ? '' : id, error: e }) + '\n');
           }
-          // The EOF arrives a moment after the response, as it does over SSH.
           if (this.oneRequestPerConnection && (failed || method !== 'events.subscribe'))
             setTimeout(() => t.serverClose('eof'), 5);
         }, 0);
@@ -98,7 +88,6 @@ export class FakeHerdr {
     return this.makeClient(t);
   };
 
-  /** Connections that have sent an events.subscribe. */
   get subscriptions(): FakeTransport[] {
     return this.connections.filter((c) => c.requests.some((r) => r.method === 'events.subscribe'));
   }
@@ -108,10 +97,6 @@ export class FakeHerdr {
   }
 }
 
-/**
- * Makes a FakeHerdr answer like Herdr 0.7.5: an older version in `ping`, and a subscription that
- * names an event type it lacks rejected as a whole with serde's "unknown variant" message.
- */
 export function legacyHerdr(server: FakeHerdr, known: string[], version = '0.7.5') {
   server.uncorrelatedInvalid = true;
   server.handlers.ping = () => ({ type: 'pong', version, protocol: 17 });

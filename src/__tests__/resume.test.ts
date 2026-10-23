@@ -9,7 +9,6 @@ const flush = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 };
 
-/** A reconnector over a mutable current connection; `reopen` defaults to a fresh live one. */
 const setup = (first: Resumable | null, opts: Partial<ReconnectOptions> = {}) => {
   let current = first;
   const states: ReconnectState[] = [];
@@ -76,7 +75,7 @@ describe('Reconnector', () => {
     jest.advanceTimersByTime(1);
     await flush();
     expect(reopen).toHaveBeenCalledTimes(2);
-    jest.advanceTimersByTime(2000); // Doubled.
+    jest.advanceTimersByTime(2000);
     await flush();
     expect(reopen).toHaveBeenCalledTimes(3);
     expect(r.getState()).toEqual({ kind: 'idle' });
@@ -101,7 +100,7 @@ describe('Reconnector', () => {
     let r!: Reconnector;
     const s = setup(conn(false), {
       reopen: async () => {
-        r.kick({ auto: true }); // A view failing on the dead session while reopening.
+        r.kick({ auto: true });
         return conn(true);
       },
     });
@@ -132,7 +131,6 @@ describe('Reconnector', () => {
     r.kick({ auto: true });
     answer(true);
     await flush();
-    // One more check for the kicks that came in meanwhile, not one per kick.
     expect(c.alive).toHaveBeenCalledTimes(2);
     expect(reopen).not.toHaveBeenCalled();
   });

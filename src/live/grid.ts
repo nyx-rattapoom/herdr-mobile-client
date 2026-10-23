@@ -1,18 +1,5 @@
 import type { Line, Style } from './ansi';
 
-/**
- * Lays a parsed terminal line out on a cell grid, so the view can position everything by column
- * instead of trusting the font: Android's monospace font lacks block and box-drawing glyphs, and
- * fallback fonts have other advance widths, which made columns drift.
- *
- * - Backgrounds become full-cell rectangles.
- * - Block elements (U+2580–259F) become filled rectangles in cell fractions.
- * - Light/heavy box drawing (U+2500–257F subset) becomes line arms from the cell centre.
- * - Plain Latin text is kept in runs (one font, fixed advance); any other character is placed
- *   on its own in its cell(s).
- */
-
-/** A rectangle in cell units: x/w across cells, y/h as fractions of the cell height. */
 export type Rect = {
   x: number;
   y: number;
@@ -20,7 +7,6 @@ export type Rect = {
   h: number;
   opacity?: number;
 };
-/** Box-drawing arm weights (0 none, 1 light, 2 heavy) for up, right, down, left. */
 export type Arms = [number, number, number, number];
 export type Arc = 'tl' | 'tr' | 'br' | 'bl';
 
@@ -34,13 +20,11 @@ export type GridItem =
 export type GridBg = { col: number; cells: number; color: string };
 export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[] };
 
-/** Effective colours after `inverse`. `fg` falls back to the caller's default. */
 export function cellColors(s: Style, defaultFg: string, defaultBg: string): { fg: string; bg?: string } {
   if (s.inverse) return { fg: s.bg ?? defaultBg, bg: s.fg ?? defaultFg };
   return { fg: s.fg ?? defaultFg, bg: s.bg };
 }
 
-/** Characters rendered as one run in the monospace font: printable ASCII and Latin-1/Extended-A. */
 const isRunChar = (cp: number) => (cp >= 0x20 && cp <= 0x7e) || (cp >= 0xa0 && cp <= 0x17f);
 
 const WIDE: [number, number][] = [
@@ -104,7 +88,6 @@ const WIDE: [number, number][] = [
   [0x20000, 0x3fffd],
 ];
 
-/** Terminal column width of a code point: 0 (combining / zero-width), 1, or 2 (wide). */
 export function cellWidth(cp: number): number {
   if (
     (cp >= 0x300 && cp <= 0x36f) ||
@@ -139,14 +122,13 @@ const quad = (tl: boolean, tr: boolean, bl: boolean, br: boolean): Rect[] =>
     br && { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
   ].filter(Boolean) as Rect[];
 
-/** Block elements U+2580–259F as filled rectangles of one cell, or null. */
 export function blockRects(cp: number): Rect[] | null {
   if (cp < 0x2580 || cp > 0x259f) return null;
   if (cp === 0x2580) return full(0, 0.5);
-  if (cp <= 0x2588) return full(1 - (cp - 0x2580) / 8, (cp - 0x2580) / 8); // ▁…█ lower eighths
-  if (cp <= 0x258f) return [{ x: 0, y: 0, w: (0x2590 - cp) / 8, h: 1 }]; // ▉…▏ left eighths
+  if (cp <= 0x2588) return full(1 - (cp - 0x2580) / 8, (cp - 0x2580) / 8);
+  if (cp <= 0x258f) return [{ x: 0, y: 0, w: (0x2590 - cp) / 8, h: 1 }];
   if (cp === 0x2590) return [{ x: 0.5, y: 0, w: 0.5, h: 1 }];
-  if (cp <= 0x2593) return full(0, 1, (cp - 0x2590) / 4); // ░ ▒ ▓
+  if (cp <= 0x2593) return full(0, 1, (cp - 0x2590) / 4);
   if (cp === 0x2594) return full(0, 1 / 8);
   if (cp === 0x2595) return [{ x: 7 / 8, y: 0, w: 1 / 8, h: 1 }];
   const q: Record<number, [boolean, boolean, boolean, boolean]> = {
@@ -164,11 +146,8 @@ export function blockRects(cp: number): Rect[] | null {
   return quad(...q[cp]);
 }
 
-/** Blocks that cover the full cell width, so runs of them merge into one rectangle. */
 const spansWidth = (cp: number) => (cp >= 0x2580 && cp <= 0x2588) || (cp >= 0x2591 && cp <= 0x2594);
 
-// U+250C–254B, four per row of the Unicode chart, as [up, right, down, left] weights.
-// Encoded as 4-digit strings "urdl".
 const BOX_250C =
   '0110 0210 0120 0220 0011 0012 0021 0022 1100 1200 2100 2200 1001 1002 2001 2002 ' +
   '1110 1210 2110 1120 2120 2210 1220 2220 1011 1012 2011 1021 2021 2012 1022 2022 ' +
@@ -176,7 +155,6 @@ const BOX_250C =
   '1111 1112 1211 1212 2111 1121 2121 2112 2211 1122 1221 2212 1222 2122 2221 2222';
 const BOX_2574 = '0001 1000 0100 0010 0002 2000 0200 0020 0201 1020 0102 2010';
 
-/** Light/heavy box-drawing lines as arm weights, or null (dashes, doubles: drawn as glyphs). */
 export function boxArms(cp: number): Arms | null {
   let code: string | undefined;
   if (cp === 0x2500) code = '0101';
@@ -223,13 +201,11 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
       }
       const w = cellWidth(cp);
       if (w === 0) {
-        // Combining marks join the preceding character.
         if (last && (last.kind === 'text' || last.kind === 'glyph')) last.text += ch;
         continue;
       }
       pushBg(col, w, spanBg);
       const adjacent = last && last.col + last.cells === col && sameStyle(last.style, style);
-      // A space only needs a node when it extends a text run or is drawn (underline/inverse).
       if (ch === ' ' && !(adjacent && last.kind === 'text') && !style.underline && !style.inverse) {
         col += 1;
         continue;

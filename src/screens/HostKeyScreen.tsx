@@ -7,7 +7,6 @@ import { Button, Header, colors, styles } from './ui';
 type Props = {
   server: ServerProfile;
   decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }>;
-  /** Set when the user forgot an earlier pin for this endpoint. */
   previous?: ForgottenPin | null;
   onTrust: () => void;
   onCancel: () => void;

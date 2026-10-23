@@ -3,7 +3,6 @@ import { buildTree, fetchSnapshot, type SessionSnapshot, type WorkspaceNode } fr
 import { checkVersion, parseUnknownVariant, ping, type ServerInfo } from '../protocol/version';
 import { agentAlerts, agentsFromSnapshot, type AgentAlert, type AgentMap } from './agents';
 
-/** Lifecycle events that can change the workspace → tab → pane tree. */
 export const TREE_EVENTS = [
   'workspace.created',
   'workspace.updated',
@@ -26,50 +25,31 @@ export const TREE_EVENTS = [
   'pane.agent_detected',
 ] as const;
 
-/** `unsupported`: the server's Herdr is too old or rejected a request as malformed; no retries. */
 export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline' | 'unsupported';
 
 export type LiveState = {
   status: LiveStatus;
   error?: string;
-  /** Code of the error behind `error`, e.g. `ERR_NO_SESSION` when the SSH session is gone. */
   errorCode?: string;
-  /** From `ping` on connect. */
   server?: ServerInfo;
-  /** Event types this server rejected and that are no longer subscribed to. */
   droppedEvents?: string[];
   snapshot?: SessionSnapshot;
   tree: WorkspaceNode[];
   agents: AgentMap;
-  /**
-   * pane_id → when the phone saw that agent's status change (ms since epoch). 0 for statuses
-   * already present at the first snapshot, whose start time is unknown.
-   */
   since: Map<string, number>;
 };
 
 export type LiveOptions = {
-  /** Coalesces bursts of events into one snapshot read. */
   debounceMs?: number;
-  /** Reconnect backoff: base delay, doubled per attempt up to maxRetryMs. */
   retryMs?: number;
   maxRetryMs?: number;
-  /** Errors from `open` with these codes mean the SSH session is gone; stop retrying. */
   fatalCodes?: string[];
   onAlert?: (a: AgentAlert) => void;
-  /** Clock for status-change times; tests replace it. */
   now?: () => number;
-  /** Every failed request, so the owner can check whether the SSH session behind it still works. */
   onRequestError?: (e: unknown) => void;
-  /** Called when the user chooses to connect to a server older than the minimum. */
   onContinueAnyway?: (version?: string) => void;
 };
 
-/**
- * Keeps a live view of one Herdr session: subscribes to lifecycle and per-pane agent-status
- * events, and treats events as cache invalidation followed by an authoritative
- * `session.snapshot` read, as Herdr's socket docs prescribe.
- */
 export class LiveSession {
   private state: LiveState = { status: 'connecting', tree: [], agents: new Map(), since: new Map() };
   private listeners = new Set<(s: LiveState) => void>();
@@ -80,14 +60,10 @@ export class LiveSession {
   private refreshing: Promise<void> | null = null;
   private refreshAgain = false;
   private attempt = 0;
-  /** Bumped by retryNow(); work started by an earlier attempt can no longer change the state. */
   private gen = 0;
   private stopped = false;
-  /** Set by continueAnyway(): skip the version check. */
   private allowOld = false;
-  /** Event types the server rejected; not subscribed to again. */
   private dropped = new Set<string>();
-  /** The first snapshot is a baseline: agents already blocked when we connect don't alert. */
   private baselined = false;
   private readonly opts: Required<Omit<LiveOptions, 'onAlert' | 'onContinueAnyway' | 'onRequestError'>> &
     Pick<LiveOptions, 'onAlert' | 'onContinueAnyway' | 'onRequestError'>;
@@ -117,7 +93,6 @@ export class LiveSession {
     return () => this.listeners.delete(listener);
   }
 
-  /** Resolves with the state once it leaves `connecting`, or with the current state after `timeoutMs`. */
   whenSettled(timeoutMs: number): Promise<LiveState> {
     return new Promise((resolve) => {
       const done = () => {
@@ -144,30 +119,22 @@ export class LiveSession {
     this.sub = null;
   }
 
-  /** Sends a request, then refreshes the tree. */
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const result = await this.query<T>(method, params);
     this.scheduleRefresh();
     return result;
   }
 
-  /** Read-only requests that should not trigger a tree refresh (e.g. pane.read polling). */
   async query<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
     return this.withConnection((c) => c.request<T>(method, params, timeoutMs));
   }
 
-  /** Connects to a server whose Herdr is older than the minimum; some features may fail. */
   continueAnyway(): void {
     this.allowOld = true;
     this.opts.onContinueAnyway?.(this.state.server?.version);
     this.retryNow();
   }
 
-  /**
-   * Forces a reconnect (e.g. after the user taps Retry, or over a new SSH session). The old
-   * subscription and any read or connect still in flight belong to the previous attempt: their
-   * late failures are ignored instead of knocking the new attempt back to reconnecting.
-   */
   retryNow(): void {
     if (this.stopped) return;
     this.attempt = 0;
@@ -181,10 +148,6 @@ export class LiveSession {
     void this.connect();
   }
 
-  /**
-   * Herdr answers one request per connection and then closes it (only subscriptions and waits
-   * stay open), so every request gets its own connection. Reusing one races the server's EOF.
-   */
   private async withConnection<T>(fn: (c: HerdrClient) => Promise<T>): Promise<T> {
     try {
       const c = await this.open();
@@ -204,7 +167,6 @@ export class LiveSession {
     try {
       const server = await this.withConnection(ping);
       if (this.stopped || gen !== this.gen) return;
-      // The SSH session works again; a stale code would make the owner replace it once more.
       this.update({ server, errorCode: undefined });
       if (!this.allowOld) checkVersion(server);
       await this.resubscribe(this.paneIds(this.state.snapshot));
@@ -220,10 +182,6 @@ export class LiveSession {
     return (s?.panes ?? []).map((p) => p.pane_id).sort();
   }
 
-  /**
-   * Opens a new subscription before dropping the old one so no events are missed. A server that
-   * rejects an event type it doesn't know lists the ones it does; subscribe again without the others.
-   */
   private async resubscribe(panes: string[]): Promise<void> {
     for (let tries = 0; ; tries++) {
       try {
@@ -301,7 +259,6 @@ export class LiveSession {
     }, this.opts.debounceMs);
   }
 
-  /** Serialised snapshot reads; a request made during a read triggers one more read. */
   private async refresh(): Promise<void> {
     if (this.refreshing) {
       this.refreshAgain = true;
@@ -319,7 +276,7 @@ export class LiveSession {
         this.baselined = true;
         if (panes.join(',') !== this.subscribedPanes) {
           await this.resubscribe(panes);
-          this.refreshAgain = true; // Events between the read and the new subscription.
+          this.refreshAgain = true;
         }
       } while (this.refreshAgain && !this.stopped && gen === this.gen);
     })();
@@ -356,7 +313,6 @@ export class LiveSession {
       return;
     }
     if (code === 'invalid_request') {
-      // The same request would be rejected again; retrying only loops.
       this.update({
         status: 'unsupported',
         errorCode: code,

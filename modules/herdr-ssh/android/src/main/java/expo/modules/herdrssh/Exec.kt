@@ -16,10 +16,6 @@ object Exec {
   const val MAX_TIMEOUT_MS = 600_000L
   private const val CONNECT_TIMEOUT_MS = 10_000
 
-  /**
-   * Runs `command` on an exec channel with a hard deadline. Both streams are drained
-   * concurrently; on timeout or error the channel is closed and the readers cancelled.
-   */
   fun run(session: Session, command: String, timeoutMs: Long, io: ExecutorService): Map<String, Any> {
     val deadline = timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS)
     val channel = session.openChannel("exec") as ChannelExec
@@ -29,7 +25,6 @@ object Exec {
       channel.setCommand(command)
       val stdout = channel.inputStream
       val stderr = channel.errStream
-      // Within the deadline: on a link that stopped answering, opening the channel is what hangs.
       channel.connect(minOf(deadline, CONNECT_TIMEOUT_MS.toLong()).toInt())
       outFuture = io.submit<String> { readLimited(stdout) }
       errFuture = io.submit<String> { readLimited(stderr) }

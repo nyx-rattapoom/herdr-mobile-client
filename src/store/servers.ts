@@ -9,9 +9,7 @@ export type ServerProfile = {
   host: string;
   port: number;
   username: string;
-  /** `key`: the device key, with the saved password (if any) as fallback. Older profiles: password. */
   auth?: AuthMethod;
-  /** Optional absolute path of herdr on the server when it is not discoverable. */
   herdrPath?: string;
 };
 
@@ -24,12 +22,10 @@ export type ServerInput = {
   port: number;
   username: string;
   auth?: AuthMethod;
-  /** Empty when editing means "keep the saved password". */
   password: string;
   herdrPath?: string;
 };
 
-/** Whether any profile still connects to host:port (host-key pins are per endpoint, not per profile). */
 export function endpointInUse(list: Pick<ServerProfile, 'host' | 'port'>[], host: string, port: number): boolean {
   return list.some((o) => endpointId(o.host, o.port) === endpointId(host, port));
 }
@@ -48,7 +44,6 @@ export function validateServer(input: ServerInput, opts: { hasSavedPassword?: bo
   return null;
 }
 
-/** Server profiles in plain secure storage; their passwords in the secrets store. */
 export class ServerStore {
   constructor(
     private readonly kv: KeyValueStore,
@@ -76,7 +71,6 @@ export class ServerStore {
     return profile;
   }
 
-  /** Updates a profile. An empty password keeps the saved one; `clearPassword` removes it. */
   async update(id: string, input: ServerInput, opts: { clearPassword?: boolean } = {}): Promise<ServerProfile> {
     const all = await this.list();
     const i = all.findIndex((s) => s.id === id);

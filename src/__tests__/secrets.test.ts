@@ -72,9 +72,9 @@ describe('Secrets', () => {
     let markReady!: () => void;
     const ready = new Promise<void>((r) => (markReady = r));
     const s = new Secrets(plain, vault, () => bio, ready);
-    await s.enableBiometric([]); // vault exists
+    await s.enableBiometric([]);
     const write = s.setItem('pw.early', 'x');
-    bio = true; // settings finish loading with biometrics on
+    bio = true;
     markReady();
     await write;
     expect(plain.map.has('pw.early')).toBe(false);

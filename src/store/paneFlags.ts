@@ -1,10 +1,8 @@
 import type { KeyValueStore } from '../ssh/pinning';
 import { safeKeyPart } from './viewed';
 
-/** Local-only marks on a pane. */
 export type PaneFlag = { pinned?: boolean; muted?: boolean; snoozeUntil?: number };
 
-/** Snooze presets from `now`: one hour, and tomorrow at 09:00 local time. */
 export function snoozePresets(now: number): { id: string; label: string; until: number }[] {
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -15,7 +13,6 @@ export function snoozePresets(now: number): { id: string; label: string; until: 
   ];
 }
 
-/** The next time `HH:MM` (24 h) comes round after `now`; null if it isn't a time. */
 export function nextClockTime(input: string, now: number): number | null {
   const m = /^\s*([01]?\d|2[0-3])[:.]([0-5]\d)\s*$/.exec(input);
   if (!m) return null;
@@ -25,7 +22,6 @@ export function nextClockTime(input: string, now: number): number | null {
   return d.getTime();
 }
 
-/** `14:05` today, or `Tue 09:00` on another day. */
 export function formatUntil(until: number, now: number): string {
   const d = new Date(until);
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -34,11 +30,6 @@ export function formatUntil(until: number, now: number): string {
     : `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${hm}`;
 }
 
-/**
- * Pin, mute and snooze marks for the panes of one server profile + session, stored on this device.
- * A snoozed pane is hidden from the agents list and silent until its time, then comes back by
- * itself (listeners are told when a snooze ends).
- */
 export class PaneFlags {
   private flags: Record<string, PaneFlag> = {};
   private listeners = new Set<() => void>();
@@ -59,7 +50,6 @@ export class PaneFlags {
     return () => this.listeners.delete(l);
   }
 
-  /** Changes on every update, for useSyncExternalStore. */
   getVersion = () => this.version;
 
   private emit() {
@@ -89,7 +79,6 @@ export class PaneFlags {
     return u !== undefined && u > this.now();
   }
 
-  /** No notifications for this pane: muted, or snoozed. */
   isSilenced(paneId: string): boolean {
     return Boolean(this.flags[paneId]?.muted) || this.isSnoozed(paneId);
   }
@@ -114,7 +103,6 @@ export class PaneFlags {
   snooze = (paneId: string, until: number) => this.change(paneId, { snoozeUntil: until });
   unsnooze = (paneId: string) => this.change(paneId, { snoozeUntil: undefined });
 
-  /** Forgets panes that no longer exist and snoozes that are over. */
   async prune(existing: Set<string>): Promise<void> {
     if (!this.loaded) {
       this.pendingPrune = existing;
@@ -135,7 +123,6 @@ export class PaneFlags {
     await this.kv.setItem(this.key, JSON.stringify(this.flags));
   }
 
-  /** Wakes listeners when the earliest snooze ends, so the pane reappears on its own. */
   private schedule() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -144,7 +131,6 @@ export class PaneFlags {
       .map((f) => f.snoozeUntil)
       .filter((u): u is number => u !== undefined && u > now);
     if (!ends.length) return;
-    // setTimeout overflows past ~24.8 days; check again then.
     const wait = Math.min(Math.min(...ends) - now + 50, 2 ** 31 - 1);
     this.timer = setTimeout(() => {
       this.timer = null;

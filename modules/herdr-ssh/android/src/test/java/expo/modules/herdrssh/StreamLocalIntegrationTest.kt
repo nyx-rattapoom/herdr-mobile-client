@@ -10,10 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/**
- * Runs against the Docker test server: HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222.
- * Exercises the same JSch configuration the module uses.
- */
 class StreamLocalIntegrationTest {
   private val target = System.getenv("HERDR_TEST_SSH").orEmpty()
 
@@ -45,7 +41,6 @@ class StreamLocalIntegrationTest {
     val (user, _, host, port) = parts()
     val wrong = probe(user, host, port).copyOf().also { it[it.size - 1] = (it.last() + 1).toByte() }
     val s = session(user, host, port, PinnedHostKeyRepository(wrong))
-    // No password configured: reaching auth would fail differently ("Auth fail").
     try {
       s.connect(10_000)
       throw AssertionError("connected with a wrong pin")
@@ -91,7 +86,6 @@ class StreamLocalIntegrationTest {
     val k = Keys.generateEd25519("herdr-client-test")
     val pub = k.getValue("publicKey")
     val marker = pub.split(" ")[1]
-    // Install the key using a password session.
     val admin = session(user, host, port, PinnedHostKeyRepository(hostKey)).apply {
       setPassword(pw)
       setConfig("PreferredAuthentications", "password")
@@ -110,7 +104,6 @@ class StreamLocalIntegrationTest {
       assertTrue(exec(s, "echo key-ok").contains("key-ok"))
       s.disconnect()
     } finally {
-      // Base64 may contain '/', so match it as a fixed string.
       exec(admin, "grep -vF '$marker' ~/.ssh/authorized_keys > ~/.ssh/ak.tmp; mv ~/.ssh/ak.tmp ~/.ssh/authorized_keys")
       admin.disconnect()
     }
@@ -136,7 +129,6 @@ class StreamLocalIntegrationTest {
         assertTrue(e.message, e.code == "ERR_TIMEOUT")
       }
       assertTrue("took too long", System.currentTimeMillis() - t0 < 5_000)
-      // The session is still usable afterwards.
       assertTrue(Exec.run(s, "echo again", 10_000, io)["stdout"] == "again\n")
     } finally {
       io.shutdownNow()

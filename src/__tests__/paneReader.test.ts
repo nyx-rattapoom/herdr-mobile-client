@@ -60,7 +60,6 @@ describe('PaneReader', () => {
     fail = false;
     jest.advanceTimersByTime(1000);
     await tick();
-    // The empty pane is re-emitted so the view drops its error banner.
     expect(outputs).toEqual(['', '']);
     r.stop();
   });
@@ -99,7 +98,6 @@ describe('PaneReader', () => {
     r.start();
     await tick();
     const history = r.loadHistory();
-    // A second tap joins the read already running.
     expect(r.loadHistory()).toBe(history);
     jest.advanceTimersByTime(5000);
     await tick();

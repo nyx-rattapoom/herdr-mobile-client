@@ -102,13 +102,8 @@ export const styles = StyleSheet.create({
   errorText: { color: '#ffd6d7', fontSize: 14 },
 });
 
-/**
- * How long a closing modal takes to go away. Opening another modal before then loses its first
- * tap on Android, so sheets that replace a sheet open after this delay.
- */
 export const MODAL_SWAP_MS = 350;
 
-/** Bottom-sheet styles shared by the workspace and agents sheets. */
 export const sheet = {
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' as const },
   panel: {

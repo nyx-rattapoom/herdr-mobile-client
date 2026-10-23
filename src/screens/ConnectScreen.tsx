@@ -4,7 +4,6 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { CONNECT_STEPS, progressFraction, type ConnectProgress } from '../live/connectSteps';
 import { Button, colors, styles } from './ui';
 
-/** Step-by-step progress while opening a server. */
 export function ConnectScreen({ progress, onCancel }: { progress: ConnectProgress; onCancel: () => void }) {
   const [now, setNow] = useState(progress.startedAt);
   useEffect(() => {

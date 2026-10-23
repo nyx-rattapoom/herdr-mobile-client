@@ -1,10 +1,6 @@
 import type { AgentAlert } from './agents';
 import { cleanLabel } from './text';
 
-/**
- * Suppresses repeats of the same alert for the same pane within a window. Snapshot reads can
- * lag behind status events, so a pane may briefly flap back (blocked → working → blocked).
- */
 export class AlertDeduper {
   private last = new Map<string, number>();
 
@@ -25,7 +21,6 @@ export class AlertDeduper {
 
 export type AlertContext = { server: string; session: string; workspaceLabel?: string };
 
-/** Notification text. Server-supplied parts are sanitised and kept short (they show on the lock screen's public version only as "Herdr Client"). */
 export function formatAlert(a: AgentAlert, ctx: AlertContext): { title: string; body: string } {
   const who = cleanLabel(a.agent, 30) ?? 'Agent';
   const where = [

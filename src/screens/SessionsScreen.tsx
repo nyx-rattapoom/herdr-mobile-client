@@ -22,7 +22,6 @@ type Props = {
   onOpenSession: (session: string) => void;
   onAction?: (t: TreeTarget) => void;
   onBack: () => void;
-  /** Re-establishes the SSH connection when a session reports it is gone. */
   onReconnect?: () => void;
   banner?: React.ReactNode;
 };
@@ -44,7 +43,6 @@ export function Status({ value }: { value?: string }) {
   );
 }
 
-/** One coloured dot for an agent status; a hollow one when there is no agent. */
 export function StatusDot({ value: raw, size = 8 }: { value?: string; size?: number }) {
   const value = raw === 'unknown' ? undefined : raw;
   const color = value ? (statusColor[value] ?? colors.muted) : 'transparent';
@@ -92,7 +90,6 @@ function SessionSummary({
   );
 }
 
-/** The server's Herdr sessions; tapping one opens its workspaces. */
 export function SessionsScreen({
   title,
   entries,

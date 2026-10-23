@@ -1,9 +1,5 @@
 import { LineBuffer, type Transport } from './transport';
 
-/**
- * Largest accepted JSON line (UTF-16 code units). Snapshots and pane reads of normal sessions are
- * far smaller; anything bigger is treated as a protocol violation rather than parsed on the JS thread.
- */
 export const MAX_LINE_CHARS = 2 * 1024 * 1024;
 
 export class HerdrApiError extends Error {
@@ -16,7 +12,6 @@ export class HerdrApiError extends Error {
   }
 }
 
-/** A pushed line from an `events.subscribe` connection. */
 export type HerdrEvent = { event: string; data: Record<string, unknown> };
 
 type Pending = {
@@ -25,10 +20,6 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-/**
- * Request/response client for Herdr's newline-delimited JSON socket API.
- * One request per line; responses are matched to requests by `id`.
- */
 export class HerdrClient {
   private readonly lines = new LineBuffer();
   private readonly pending = new Map<string, Pending>();
@@ -46,15 +37,10 @@ export class HerdrClient {
     transport.onClose((reason) => this.fail(new HerdrApiError('closed', `connection closed: ${reason}`)));
   }
 
-  /** Pushed events (lines with an `event` field and no request id). */
   onEvent(handler: (e: HerdrEvent) => void): void {
     this.eventHandler = handler;
   }
 
-  /**
-   * Errors for requests that already succeeded, e.g. `events_lost` on a subscription,
-   * after which the server closes the connection.
-   */
   onStreamError(handler: (e: HerdrApiError) => void): void {
     this.streamErrorHandler = handler;
   }
@@ -107,7 +93,6 @@ export class HerdrClient {
     if (this.lines.remainder.length > MAX_LINE_CHARS) this.overflow();
   }
 
-  /** Closes the connection on an oversized line; the server is misbehaving or not Herdr. */
   private overflow(): void {
     this.transport.close();
     this.fail(new HerdrApiError('protocol', `response line longer than ${MAX_LINE_CHARS} characters`));
@@ -118,7 +103,7 @@ export class HerdrClient {
     try {
       msg = JSON.parse(line);
     } catch {
-      return; // Not ours to interpret; Herdr only sends JSON lines.
+      return;
     }
     if (typeof msg !== 'object' || msg === null) return;
     const { id, result, error, event, data } = msg as Record<string, unknown>;
@@ -128,8 +113,6 @@ export class HerdrClient {
     }
     const err = error !== undefined ? toApiError(error) : null;
     if (err && (id === '' || id === undefined) && this.pending.size === 1) {
-      // Herdr before 0.8 answers a request it can't parse with an empty id. It reads one request
-      // per connection, so the error belongs to the one in flight.
       this.settle([...this.pending.keys()][0])?.reject(err);
       return;
     }

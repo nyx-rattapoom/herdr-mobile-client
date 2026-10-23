@@ -6,7 +6,6 @@ import { BottomSheet, CenteredDialog, overlayInsets } from '../screens/Sheet';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 
-// A landscape phone with the navigation bar on the right, plus a status bar and gesture handle.
 const metrics = {
   frame: { x: 0, y: 0, width: 891, height: 411 },
   insets: { top: 24, bottom: 16, left: 0, right: 48 },
@@ -20,7 +19,6 @@ function render(el: React.ReactElement) {
   return r!;
 }
 
-/** The style of the native view with this testID. */
 const flat = (r: ReactTestRenderer, testID: string) =>
   StyleSheet.flatten(r.root.find((n) => n.props.testID === testID && typeof n.type === 'string').props.style);
 

@@ -8,7 +8,6 @@ export const TERM_FG = '#e5e7eb';
 export const TERM_BG = '#000';
 const FONT = 'monospace';
 
-/** Cell size in dp. `w` is measured from the font; `h` is the fixed row height. */
 export type CellMetrics = {
   fontSize: number;
   w: number;
@@ -27,7 +26,6 @@ export function cellMetrics(fontSize: number, w = fontSize * 0.6): CellMetrics {
 
 const PROBE = 'M'.repeat(40);
 
-/** Measures the monospace advance width once, from the laid-out width of a probe string. */
 export function useCellMetrics(fontSize: number): {
   metrics: CellMetrics;
   probe: React.ReactNode;
@@ -46,7 +44,6 @@ export function useCellMetrics(fontSize: number): {
         {PROBE}
       </Text>
     ) : null;
-  // One object per size: TermRow is memoized on it, and a list redraws every row when it changes.
   const metrics = useMemo(() => cellMetrics(fontSize, w ?? undefined), [fontSize, w]);
   return { metrics, probe };
 }
@@ -93,7 +90,6 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
   const dim = it.style.dim ? 0.6 : undefined;
   switch (it.kind) {
     case 'text':
-      // Slack of one cell so rounding never wraps or ellipsizes the run; the next item covers it.
       return (
         <Text
           key={key}
@@ -105,7 +101,6 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
         </Text>
       );
     case 'glyph':
-      // Centred on its cell(s); a fallback-font glyph wider than the cell may overflow, as in terminals.
       return (
         <Text
           key={key}
@@ -126,7 +121,6 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
       const cy = m.h / 2;
       const out: React.ReactNode[] = [];
       if (it.cells > 1) {
-        // A merged run of horizontal lines.
         out.push(<View key={`${key}h`} style={rect(x, cy - right / 2, it.cells * m.w, right, fg, dim)} />);
         return out;
       }
@@ -143,7 +137,6 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
       return out;
     }
     case 'arc': {
-      // A quarter of a rounded rectangle from the cell centre to the two edges it connects.
       const t = m.line;
       const cx = x + m.w / 2;
       const cy = m.h / 2;
@@ -168,7 +161,6 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
   }
 }
 
-/** One terminal row: full-cell backgrounds, then lines, blocks and text positioned by column. */
 export const TermRow = memo(function TermRow({ g, m }: { g: GridLine; m: CellMetrics }) {
   return (
     <View style={{ height: m.h, width: g.cols * m.w }}>

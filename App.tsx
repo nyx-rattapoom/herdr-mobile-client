@@ -44,12 +44,9 @@ import { plainKv, useAccount } from './src/useAccount';
 
 const viewedStore = new ViewedStore(plainKv);
 const audit = new AuditLog(plainKv);
-/** Each live session's prompt queue. */
 const queues = new WeakMap<LiveSession, PromptQueues>();
-/** Each live session's local pin/mute/snooze marks. */
 const paneFlags = new WeakMap<LiveSession, PaneFlags>();
 
-/** Local pin/mute/snooze items for a pane's action sheet. */
 function flagItems(live: LiveSession, target: Target): SheetItem[] {
   const f = paneFlags.get(live);
   if (!f || target.kind !== 'pane') return [];
@@ -64,7 +61,6 @@ function flagItems(live: LiveSession, target: Target): SheetItem[] {
   ];
 }
 
-/** Destructive actions recorded in the audit log, with how they read there. */
 const AUDITED: Partial<Record<ActionId, string>> = {
   'pane.close': 'close pane',
   'tab.close': 'close tab',
@@ -89,18 +85,13 @@ type Route =
 
 type SessionsRoute = Extract<Route, { name: 'sessions' }>;
 
-/** With one running session and nothing to set up, the session list is skipped. */
 const skipsSessions = (r: SessionsRoute) => !r.setup && r.entries.filter((e) => e.live).length === 1;
 
-/** Thrown when the user cancelled the connection attempt that is still running. */
 class Cancelled extends Error {}
 
-/** How long step 6 waits for the first snapshot. */
 const SNAPSHOT_TIMEOUT_MS = 20_000;
-/** Request failures that may mean the SSH link died without closing (timeouts, channels that won't open). */
 const SUSPECT_CODES = ['timeout', 'ERR_TIMEOUT', 'ERR_CHANNEL'];
 
-/** The connection notice shown above a workspace while the SSH session is being replaced. */
 function reconnectNotice(r: ReconnectState): string | null {
   switch (r.kind) {
     case 'idle':
@@ -129,7 +120,6 @@ export default function App() {
   const [snoozing, setSnoozing] = useState<{ live: LiveSession; paneId: string; custom?: boolean } | null>(null);
   const conn = useRef<ServerConnection | null>(null);
   const lives = useRef<LiveSession[]>([]);
-  /** Keeps the current server's SSH connection working; replaced per connection. */
   const reconnector = useRef<Reconnector | null>(null);
   const [reconnect, setReconnect] = useState<ReconnectState>({ kind: 'idle' });
   const biometricRef = useRef(account.settings.biometric);
@@ -140,7 +130,6 @@ export default function App() {
   const routeRef = useRef<Route>(route);
   const deduper = useRef(new AlertDeduper());
   const pendingTap = useRef<AlertTarget | null>(null);
-  /** Bumped by every new connection attempt and by cancel; stale attempts stop at their next step. */
   const attempt = useRef(0);
   const progress = useRef<ConnectProgress | null>(null);
   const [viewed, setViewed] = useState<Record<string, number>>({});
@@ -175,7 +164,6 @@ export default function App() {
     reload();
   }, [reload]);
 
-  // Channel + permission before any alert can fire (Android 13+ asks once).
   useEffect(() => {
     void setupNotifications();
   }, []);
@@ -197,17 +185,14 @@ export default function App() {
     setRoute({ name: 'servers' });
   }, []);
 
-  /** The server profile a live view belongs to, from the current route. */
   const serverOf = (live: LiveSession): ServerProfile | null => {
     const r = routeRef.current;
     const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
     return parent?.entries.some((e) => e.live === live) ? parent.server : null;
   };
 
-  /** Posts a notification unless the user is already looking at that pane. */
   const handleAlert = useCallback((server: ServerProfile, session: string, live: LiveSession, a: AgentAlert) => {
     if (!deduper.current.accept(a, `${server.id}|${session}`)) return;
-    // Muted or snoozed on this phone.
     if (paneFlags.get(live)?.isSilenced(a.paneId)) return;
     const r = routeRef.current;
     if (
@@ -222,7 +207,6 @@ export default function App() {
     void postAgentNotification(title, body, { serverId: server.id, session, paneId: a.paneId });
   }, []);
 
-  /** Navigates to the pane named by a tapped notification, if it is loaded. */
   const openTarget = useCallback((t: AlertTarget): boolean => {
     const r = routeRef.current;
     const parent = r.name === 'sessions' ? r : r.name === 'workspace' ? r.parent : null;
@@ -244,8 +228,6 @@ export default function App() {
     return () => sub.remove();
   }, [route, home]);
 
-  /** Starts a live view of every running session and returns the sessions route (not yet shown). */
-  /** Opens a Herdr socket over whatever SSH connection is current, so a reconnect is picked up. */
   const openSocket = useCallback((socketPath: string) => {
     const c = conn.current;
     if (!c) return Promise.reject(Object.assign(new Error('Not connected to the server.'), { code: 'ERR_NO_SESSION' }));
@@ -255,7 +237,6 @@ export default function App() {
   const startSessions = useCallback((server: ServerProfile, discovery: DiscoveryResult) => {
     lives.current.forEach((l) => l.stop());
     lives.current = [];
-    // Without a working herdr there is nothing to subscribe to: offer install or start instead.
     const running = discovery.herdrFound ? discovery.sessions.filter((x) => x.running) : [];
     const setup: SetupState | undefined = !discovery.herdrBin
       ? { kind: 'install' }
@@ -265,10 +246,7 @@ export default function App() {
     const entries: SessionEntry[] = (discovery.herdrFound ? discovery.sessions : []).map((session) => {
       if (!session.running) return { session };
       const live: LiveSession = new LiveSession(() => openSocket(session.socketPath), {
-        // Retrying cannot fix an sshd that forbids socket forwarding. A dead SSH session is
-        // replaced by the reconnector, and the view keeps retrying meanwhile.
         fatalCodes: ['ERR_FORWARDING_PROHIBITED'],
-        // A request that hangs or can't open a channel may mean the link died silently.
         onRequestError: (e) => {
           if (SUSPECT_CODES.includes((e as { code?: string })?.code ?? '')) reconnector.current?.kick({ auto: true });
         },
@@ -292,7 +270,6 @@ export default function App() {
       let paneSet = '';
       live.subscribe((st) => {
         queue.drive(st.status, st.agents);
-        // Forget queues of panes that were closed.
         const ids = st.snapshot ? st.snapshot.panes.map((p) => p.pane_id).sort().join(',') : '';
         if (ids && ids !== paneSet) {
           paneSet = ids;
@@ -306,7 +283,6 @@ export default function App() {
     return { name: 'sessions', server, entries, herdrFound: discovery.herdrFound, setup } satisfies Route;
   }, [handleAlert, openSocket]);
 
-  /** Shows a sessions route and handles a notification tap that arrived before it was connected. */
   const showSessions = useCallback((route: SessionsRoute) => {
     const { server, entries } = route;
     const only = skipsSessions(route) ? entries.find((e) => e.live) : undefined;
@@ -314,7 +290,6 @@ export default function App() {
     setRoute(next);
     routeRef.current = next;
     startBackgroundMonitoring(`Watching agents on ${server.label}`);
-    // A notification tap that arrived before this server was connected.
     const tap = pendingTap.current;
     if (tap?.serverId === server.id) {
       pendingTap.current = null;
@@ -332,11 +307,6 @@ export default function App() {
     [showSessions, startSessions],
   );
 
-  /**
-   * Supervises the connection to `server`. When the SSH session dies, a new one is
-   * opened in place with the pinned key, retrying with backoff, and every live view retries over
-   * it. The screen, selection, last output and scroll positions stay as they were.
-   */
   const superviseConnection = useCallback(
     (server: ServerProfile) => {
       reconnector.current?.stop();
@@ -353,7 +323,6 @@ export default function App() {
         },
         lives: () => lives.current,
         isFatal: (e) => !isRetryableSshError(e),
-        // Biometric-protected credentials can only be unlocked in the foreground.
         canReopen: () => AppState.currentState === 'active' || !biometricRef.current,
         onState: (st) => reconnector.current === r && setReconnect(st),
       });
@@ -362,7 +331,6 @@ export default function App() {
     [pins, credentialsFor],
   );
 
-  /** Runs one connect step: shows it, and names it in the error if it fails. */
   const step = useCallback(async <T,>(id: number, n: number, fn: () => Promise<T>, note?: (r: T) => string | undefined): Promise<T> => {
     if (id !== attempt.current || !progress.current) throw new Cancelled();
     progress.current = { ...progress.current, step: n };
@@ -380,7 +348,6 @@ export default function App() {
     return result;
   }, []);
 
-  /** Steps 3–6 of CONNECT_STEPS, after the host key is known to match. */
   const connectPinned = useCallback(
     async (server: ServerProfile, pin: HostKeyPin, id: number) => {
       const c = await step(id, 2, async () => {
@@ -413,7 +380,6 @@ export default function App() {
     [credentialsFor, startSessions, showSessions, step, superviseConnection],
   );
 
-  /** Runs the official installer (if needed) and starts a server, then reloads the session list. */
   const runSetup = useCallback(
     async (server: ServerProfile, kind: SetupState['kind']) => {
       const c = conn.current;
@@ -449,7 +415,6 @@ export default function App() {
     setRoute({ name: 'servers' });
   }, []);
 
-  // Back in the foreground: check the connection now, even after a failure that needed the user.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') reconnector.current?.kick();
@@ -457,10 +422,8 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  /** The current server's sessions, while connected. */
   const liveList = route.name === 'workspace' ? route.parent.entries : route.name === 'sessions' ? route.entries : null;
 
-  // The ongoing notification summarises agent statuses on this server while connected.
   const monitorServer = route.name === 'workspace' ? route.parent.server.label : route.name === 'sessions' ? route.server.label : null;
   const link = reconnect.kind === 'idle' ? 'up' : reconnect.kind;
   useEffect(() => {
@@ -481,7 +444,6 @@ export default function App() {
     return () => subs.forEach((u) => u());
   }, [monitorServer, liveList, link]);
 
-  // Tapping the ongoing notification opens the agents sheet.
   const [agentsRequest, setAgentsRequest] = useState(0);
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {
@@ -499,9 +461,6 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // A live view that lost its SSH session, in the foreground or not, has the connection replaced.
-  // A closed subscription is checked too: it arrives as a native event, while the view's own
-  // retry (which would report ERR_NO_SESSION) needs a JS timer, and those stop with the screen.
   useEffect(() => {
     const subs = (liveList ?? []).flatMap((e) =>
       e.live
@@ -522,7 +481,6 @@ export default function App() {
       progress.current = { step: 0, target: `${server.username}@${server.host}:${server.port}`, startedAt: Date.now(), notes: {} };
       try {
         const presented = await step(id, 0, () => probeHostKey(server.host, server.port), (k) => k.algorithm);
-        // A mismatch is not an error here: the host key screen explains it.
         const decision = await step(
           id,
           1,
@@ -582,7 +540,6 @@ export default function App() {
             style: 'destructive',
             onPress: async () => {
               await servers.remove(server.id);
-              // Pins belong to host:port; keep them while another profile still uses that endpoint.
               if (!endpointInUse(await servers.list(), server.host, server.port)) await pins.purge(server.host, server.port);
               reload();
             },
@@ -607,7 +564,6 @@ export default function App() {
     try {
       const req = actionRequest(action, target, { label });
       const res = await live.request<{ tab?: { tab_id?: string }; workspace?: { workspace_id?: string } }>(req.method, req.params);
-      // Show what was just created; Herdr was asked not to focus it.
       const sel: Selection | null =
         action === 'tab.create' && res?.tab?.tab_id
           ? { workspaceId: target.kind === 'workspace' ? target.node.workspace_id : undefined, tabId: res.tab.tab_id }
@@ -629,7 +585,6 @@ export default function App() {
       const def = actionsFor(target).find((a) => a.id === id);
       if (!def) return;
       if (def.asksLabel) {
-        // After the sheet this came from has closed (see MODAL_SWAP_MS).
         setTimeout(() => setPrompt({ live, target, action: id, title: `${def.label} (optional name)` }), MODAL_SWAP_MS);
       } else if (def.destructive) {
         Alert.alert(def.label, confirmText(def, target), [

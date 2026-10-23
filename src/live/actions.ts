@@ -21,9 +21,7 @@ export type ActionId =
 export type ActionDef = {
   id: ActionId;
   label: string;
-  /** Needs explicit confirmation before it is sent. */
   destructive?: boolean;
-  /** Asks the user for an optional label first. */
   asksLabel?: boolean;
 };
 
@@ -80,7 +78,6 @@ export function confirmText(a: ActionDef, t: Target): string {
   return `${a.label}?`;
 }
 
-/** The socket request for an action on a target. Labels are trimmed; empty means "let Herdr choose". */
 export function actionRequest(id: ActionId, t: Target, opts: { label?: string } = {}): { method: string; params: Record<string, unknown> } {
   const lbl = opts.label?.trim() || undefined;
   const ws = t.kind === 'workspace' ? t.node.workspace_id : t.kind === 'tab' || t.kind === 'pane' ? t.node.workspace_id : undefined;
@@ -116,10 +113,6 @@ function need(v: string | undefined): string {
 }
 const paneOf = (t: Target) => need(t.kind === 'pane' ? t.node.pane_id : undefined);
 
-/**
- * Special keys offered in the pane key bar, as Herdr key-combo strings. `key` identifies the entry;
- * `keys` is sent instead when it is a sequence (Esc Esc). Agent shortcuts come first.
- */
 export const SPECIAL_KEYS: { key: string; label: string; keys?: string[] }[] = [
   { key: 'esc', label: 'Esc' },
   { key: 'esc esc', label: 'Esc Esc', keys: ['esc', 'esc'] },
@@ -138,13 +131,8 @@ export const SPECIAL_KEYS: { key: string; label: string; keys?: string[] }[] = [
   { key: 'ctrl+r', label: '^R' },
 ];
 
-/** The keys a special-key entry sends. */
 export const keysOf = (k: { key: string; keys?: string[] }) => k.keys ?? [k.key];
 
-/**
- * Text input request. `submit` appends Enter in the same request so the line and the key can't
- * interleave with other input. Agent prompts use `agent.prompt`, which submits on its own.
- */
 export function inputRequest(paneId: string, text: string, mode: 'type' | 'submit' | 'prompt') {
   if (mode === 'prompt') return { method: 'agent.prompt', params: { target: paneId, text } };
   if (mode === 'submit') return { method: 'pane.send_input', params: { pane_id: paneId, text, keys: ['enter'] } };
@@ -156,7 +144,6 @@ export const keyRequest = (paneId: string, key: string | string[]) => ({
   params: { pane_id: paneId, keys: Array.isArray(key) ? key : [key] },
 });
 
-/** User-facing text for Herdr action errors. */
 export function describeActionError(e: unknown): string {
   const code = (e as { code?: string })?.code;
   const msg = (e as { message?: string })?.message ?? String(e);

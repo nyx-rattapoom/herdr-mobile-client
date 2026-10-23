@@ -111,7 +111,6 @@ describe('HerdrClient', () => {
       expect(settled).toBe(false);
       jest.advanceTimersByTime(1001);
       await expect(p).rejects.toMatchObject({ code: 'timeout', message: 'pane.read timed out after 2000 ms' });
-      // Leaving it out keeps the default.
       const q = c.request('ping', {}, undefined);
       jest.advanceTimersByTime(501);
       await expect(q).rejects.toMatchObject({ message: 'ping timed out after 500 ms' });
@@ -166,7 +165,7 @@ describe('bounded buffering (review M1)', () => {
     for (let sent = 0; sent <= MAX_LINE_CHARS && !t.closed; sent += chunk.length) t.push(chunk);
     expect(t.closed).toBe(true);
     await expect(p).rejects.toMatchObject({ code: 'protocol' });
-    t.push('{"id":"req_1","result":{}}\n'); // ignored after close
+    t.push('{"id":"req_1","result":{}}\n');
   });
 
   it('closes the connection when a complete line exceeds the cap', async () => {

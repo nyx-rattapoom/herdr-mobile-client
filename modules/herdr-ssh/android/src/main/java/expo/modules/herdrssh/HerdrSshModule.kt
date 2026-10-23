@@ -27,10 +27,8 @@ import java.util.concurrent.Executors
 private const val CONNECT_TIMEOUT_MS = 15_000
 private const val CHANNEL_TIMEOUT_MS = 10_000
 private const val DEFAULT_EXEC_TIMEOUT_MS = 120_000
-/** Must match KEEP_ALIVE_TASK in index.ts. */
 private const val KEEP_ALIVE_TASK = "HerdrKeepAlive"
 
-// SSH_MSG_CHANNEL_OPEN_FAILURE reason codes (RFC 4254 §5.1).
 private const val OPEN_ADMINISTRATIVELY_PROHIBITED = 1
 private const val OPEN_CONNECT_FAILED = 2
 
@@ -43,7 +41,6 @@ class HerdrSshModule : Module() {
   private val io = Executors.newCachedThreadPool()
   private val sessions = ConcurrentHashMap<String, Session>()
   private val channels = ConcurrentHashMap<String, StreamChannel>()
-  /** The headless JS task held while monitoring; touched on the UI thread only. */
   private var keepAliveTask: Int? = null
 
   override fun definition() = ModuleDefinition {
@@ -51,8 +48,6 @@ class HerdrSshModule : Module() {
 
     Events("onChannelData", "onChannelClose")
 
-    // Completes key exchange without any credentials configured and returns the server's
-    // host key. Authentication is never attempted.
     AsyncFunction("probeHostKey") { host: String, port: Int, promise: Promise ->
       run(promise) {
         val repo = PinnedHostKeyRepository(null)
@@ -72,15 +67,10 @@ class HerdrSshModule : Module() {
       }
     }
 
-    // Generates an Ed25519 key pair on the device. The private key is returned in OpenSSH
-    // format for the app to keep in Keystore-backed storage; it never leaves the device.
     AsyncFunction("generateEd25519") { comment: String, promise: Promise ->
       run(promise) { Keys.generateEd25519(comment) }
     }
 
-    // Connects only if the server presents exactly the pinned key. Credentials are configured
-    // here but JSch uses them only after the host key check passes. With both a key and a
-    // password, public-key auth is tried first and the password is the fallback.
     AsyncFunction("connect") { host: String, port: Int, username: String, auth: Map<String, Any?>, pinnedKey: String, promise: Promise ->
       run(promise) {
         val pinned = decodeKey(pinnedKey)
@@ -117,7 +107,6 @@ class HerdrSshModule : Module() {
       }
     }
 
-    // Runs a command with a hard deadline (see Exec.run).
     AsyncFunction("exec") { sessionId: String, command: String, timeoutMs: Int?, promise: Promise ->
       run(promise) {
         Exec.run(requireSession(sessionId), command, (timeoutMs ?: DEFAULT_EXEC_TIMEOUT_MS).toLong(), io)
@@ -191,7 +180,6 @@ class HerdrSshModule : Module() {
       holdTimers(true)
     }
 
-    // FLAG_SECURE: keeps app content out of screenshots, screen recording and the recents preview.
     Function("setSecureScreen") { on: Boolean ->
       val activity = appContext.currentActivity ?: return@Function null
       activity.runOnUiThread {
@@ -215,11 +203,6 @@ class HerdrSshModule : Module() {
     }
   }
 
-  /**
-   * React Native pauses JS timers while the activity is in the background unless a headless JS
-   * task is running. Holding one while monitoring keeps retries, reconnects and snapshot
-   * refreshes working in the background, not only native events.
-   */
   private fun holdTimers(on: Boolean) {
     val context = appContext.reactContext as? ReactContext ?: return
     UiThreadUtil.runOnUiThread {
@@ -255,7 +238,6 @@ class HerdrSshModule : Module() {
     val session = jsch.getSession(user, host, port)
     session.setConfig("StrictHostKeyChecking", "yes")
     session.setConfig("HashKnownHosts", "no")
-    // Detect dead links (e.g. after network changes) instead of hanging on a silent socket.
     session.setServerAliveInterval(10_000)
     session.setServerAliveCountMax(3)
     return session

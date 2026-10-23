@@ -18,7 +18,6 @@ class KeysTest {
     assertEquals("ssh-ed25519", parts[0])
     assertEquals("phone@herdr-client", parts[2])
 
-    // JSch can load it back as an identity, and its public blob matches the exported line.
     val jsch = JSch()
     jsch.addIdentity("k", prv.toByteArray(), null, null)
     val loaded = KeyPair.load(jsch, prv.toByteArray(), null)

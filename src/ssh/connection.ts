@@ -19,7 +19,6 @@ import type { HostKeyPin } from './pinning';
 const FORWARDING_PROHIBITED_TEXT =
   "This server's sshd doesn't allow Unix-socket forwarding (AllowStreamLocalForwarding). Ask the admin to enable it for your user.";
 
-/** Herdr socket connection tunnelled over a direct-streamlocal SSH channel. */
 class SshSocketTransport implements Transport {
   private dataHandler: (chunk: string) => void = () => {};
   private closeHandler: (reason: string) => void = () => {};
@@ -58,17 +57,14 @@ class SshSocketTransport implements Transport {
 
 export type ConnectParams = { host: string; port: number; username: string; password?: string; privateKey?: string };
 
-/** An authenticated SSH session to one server. */
 export class ServerConnection {
   private constructor(private readonly sessionId: string) {}
 
-  /** The native side re-checks the pin during key exchange and fails before auth on mismatch. */
   static async open(p: ConnectParams, pin: HostKeyPin): Promise<ServerConnection> {
     const id = await HerdrSsh.connect(p.host, p.port, p.username, { password: p.password, privateKey: p.privateKey }, pin.key);
     return new ServerConnection(id);
   }
 
-  /** The installed herdr's version (e.g. `0.9.3`), or null when herdr isn't found. */
   async herdrVersion(herdrPath?: string): Promise<string | null> {
     const res = await HerdrSsh.exec(this.sessionId, versionCommand(herdrPath), 30_000);
     return parseHerdrVersion(res.stdout);
@@ -79,14 +75,11 @@ export class ServerConnection {
     return parseDiscovery(res.stdout);
   }
 
-  /** Runs the official Herdr installer on the server (user-confirmed). */
   async installHerdr(): Promise<InstallOutcome & { log: string }> {
-    // Download + checksum + install; allow more than the default 120 s on slow links.
     const res = await HerdrSsh.exec(this.sessionId, installCommand(), 300_000);
     return { ...explainInstall(res.exitCode, res.stdout, res.stderr), log: `${res.stdout}${res.stderr}` };
   }
 
-  /** Starts a detached default-session server if none is running. */
   async startHerdr(herdrPath?: string): Promise<InstallOutcome> {
     const res = await HerdrSsh.exec(this.sessionId, startServerCommand(herdrPath));
     return explainStart(res.exitCode);
@@ -102,13 +95,8 @@ export class ServerConnection {
     return new HerdrClient(new SshSocketTransport(channelId));
   }
 
-  /**
-   * OpenSSH answers both "no such socket" and "AllowStreamLocalForwarding no" with the same
-   * generic open failure, so look at the server: if the socket exists, forwarding was refused.
-   */
   private async explainOpenFailure(e: unknown, socketPath: string): Promise<unknown> {
     if ((e as { code?: string })?.code !== 'ERR_SOCKET_UNAVAILABLE') return e;
-    // The path comes from the server; only probe paths that need no quoting in any shell.
     if (!SAFE_SERVER_PATH.test(socketPath)) return e;
     try {
       const res = await HerdrSsh.exec(this.sessionId, `test -S ${socketPath} && echo SOCKET_EXISTS`);
@@ -118,12 +106,10 @@ export class ServerConnection {
         });
       }
     } catch {
-      // Keep the original error.
     }
     return e;
   }
 
-  /** Whether the SSH session still runs commands; false after a dropped connection. */
   async alive(timeoutMs = 5000): Promise<boolean> {
     try {
       await HerdrSsh.exec(this.sessionId, 'true', timeoutMs);
@@ -140,21 +126,15 @@ export class ServerConnection {
 
 export const probeHostKey = (host: string, port: number) => HerdrSsh.probeHostKey(host, port);
 
-/**
- * Whether opening a new SSH session may work if tried again later: the network or server is
- * unreachable for now. Authentication, host key and credential errors need the user.
- */
 export function isRetryableSshError(e: unknown): boolean {
   const code = (e as { code?: string })?.code;
   return code === 'ERR_CONNECT' || code === 'ERR_TIMEOUT' || code === 'ERR_SSH';
 }
 
-/** User-facing text for native error codes. */
 export function describeSshError(e: unknown): string {
   if (e instanceof ConnectStepError) return e.message;
   const code = (e as { code?: string })?.code;
   const msg = (e as { message?: string })?.message ?? String(e);
-  // expo-secure-store rejections from the biometric vault.
   if (/canceled the authentication|User canceled|authentication was canceled/i.test(msg)) {
     return 'Unlock cancelled. Saved credentials stay locked until you authenticate.';
   }

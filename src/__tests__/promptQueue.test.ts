@@ -32,7 +32,6 @@ describe('PromptQueues', () => {
     await flush();
     expect(sent).toEqual(['first']);
     expect(q.items('p1').map((i) => i.text)).toEqual(['second']);
-    // Still idle: the agent hasn't picked the first one up yet, so the second waits.
     q.drive('live', agents('idle'));
     await flush();
     expect(sent).toEqual(['first']);

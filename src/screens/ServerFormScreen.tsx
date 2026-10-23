@@ -6,7 +6,6 @@ import { authOf, validateServer, type AuthMethod, type ServerInput, type ServerP
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
-  /** Present when editing. */
   initial?: ServerProfile;
   hasSavedPassword?: boolean;
   devicePublicKey: string | null;

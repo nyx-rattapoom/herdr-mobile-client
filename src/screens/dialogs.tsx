@@ -20,7 +20,6 @@ export function ActionSheet({
   return (
     <BottomSheet animation="fade" onClose={onClose} testID="action-sheet">
       <Text style={[styles.muted, { marginBottom: 8 }]}>{title}</Text>
-      {/* Landscape phones can't fit every action at once. */}
       <ScrollView style={{ flexShrink: 1, flexGrow: 0 }} testID="action-list">
         {items.map((it) => (
           <Pressable

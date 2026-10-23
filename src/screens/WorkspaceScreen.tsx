@@ -29,41 +29,27 @@ import { Button, MODAL_SWAP_MS, colors, sheet, styles } from './ui';
 type Props = {
   live: LiveSession;
   session: string;
-  /** `user@host`, for the status line. */
   host: string;
   sel: Selection;
   onSelect: (s: Selection) => void;
   onBack: () => void;
   onReconnect?: () => void;
-  /** A connection notice, e.g. while reconnecting after a resume. */
   notice?: string | null;
-  /** Bumped to open the agents sheet (e.g. from the ongoing notification). */
   agentsRequest?: number;
-  /** Local pin/mute/snooze marks for this session's panes. */
   flags?: PaneFlags;
-  /** Opens the action sheet for a long-pressed target. */
   onAction: (t: Target) => void;
-  /** Runs one action directly (it still asks for a label or confirmation where needed). */
   onPick: (t: Target, id: ActionId) => void;
-  /** When each pane was last opened, for "unseen" done agents. */
   viewed: Record<string, number>;
-  /** Called when a pane is shown and when it stops being shown. */
   onViewPane: (paneId: string) => void;
   footer?: (paneId: string, pokeNow: () => void, blank: boolean, screen: Line[]) => ReactNode;
 };
 
-/**
- * The main screen for one Herdr session: one workspace at a time, its tabs as chips and the
- * selected tab's pane(s). Selecting only changes what the phone shows; it never focuses anything
- * in Herdr. Focusing is an explicit action in the long-press menus.
- */
 export function WorkspaceScreen(p: Props) {
   const st = useLive(p.live);
   const [switcher, setSwitcher] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [seenRequest, setSeenRequest] = useState(p.agentsRequest ?? 0);
   if ((p.agentsRequest ?? 0) !== seenRequest) {
-    // Adjusting state during render on a prop change (React's documented pattern).
     setSeenRequest(p.agentsRequest ?? 0);
     setAgentsOpen(true);
   }
@@ -71,7 +57,6 @@ export function WorkspaceScreen(p: Props) {
   const select = (s: Selection) => p.onSelect(s);
   const paneId = pane?.pane_id;
   const paneNode = (id: string) => st.tree.flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((x) => x.pane_id === id);
-  // Tablets and landscape phones keep the agent list beside the pane instead of in a sheet.
   const wide = useWindowDimensions().width >= WIDE_DP;
   const { onViewPane } = p;
   useEffect(() => {
@@ -81,7 +66,6 @@ export function WorkspaceScreen(p: Props) {
   }, [paneId, onViewPane]);
 
   return (
-    // Edge-to-edge Android doesn't resize the window for the keyboard; pad instead.
     <KeyboardAvoidingView style={styles.screen} behavior="padding" testID="workspace">
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {wide ? (
@@ -277,7 +261,6 @@ export function WorkspaceScreen(p: Props) {
   );
 }
 
-/** Bottom sheet listing every workspace with its rolled-up status. */
 function WorkspaceSheet({
   live,
   current,
@@ -331,7 +314,6 @@ function WorkspaceSheet({
   );
 }
 
-/** Width (dp) from which the agent list is shown as a side panel. */
 const WIDE_DP = 840;
 
 const ui = {

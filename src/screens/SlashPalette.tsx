@@ -8,13 +8,8 @@ import { BottomSheet } from './Sheet';
 import { colors, sheet, styles } from './ui';
 
 const SIZE = 52;
-/** Movement (dp) below which a touch counts as a tap rather than a drag. */
 const TAP_SLOP = 6;
 
-/**
- * A floating `/` button over the pane output. Drag to move it; tap for the agent's slash
- * commands; long-press for special keys.
- */
 export function SlashButton({
   live,
   paneId,
@@ -23,7 +18,6 @@ export function SlashButton({
 }: {
   live: LiveSession;
   paneId: string;
-  /** The detected agent, or undefined for a plain shell. */
   agent?: string;
   onSent: () => void;
 }) {
@@ -69,7 +63,6 @@ export function SlashButton({
   );
 }
 
-/** Tells taps, long-presses and drags of the floating button apart, and moves it. */
 class DragTracker {
   private offset = { x: 0, y: 0 };
   private longPressed = false;
@@ -132,7 +125,6 @@ function SlashSheet({
   const started = useRef(false);
 
   useEffect(() => {
-    // Once per sheet: opening types `/` into the pane.
     if (!agent || started.current) return;
     started.current = true;
     menu
@@ -245,7 +237,6 @@ function SlashSheet({
   );
 }
 
-/** Special keys, from a long-press on the / button. */
 function KeysSheet({
   live,
   paneId,

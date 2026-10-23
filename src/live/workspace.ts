@@ -1,7 +1,6 @@
 import type { PaneNode, TabNode, WorkspaceNode } from '../protocol/snapshot';
 import type { AgentMap } from './agents';
 
-/** What the phone is looking at. Purely local: changing it never focuses anything in Herdr. */
 export type Selection = { workspaceId?: string; tabId?: string; paneId?: string };
 
 export type Resolved = { ws?: WorkspaceNode; tab?: TabNode; pane?: PaneNode };
@@ -9,10 +8,6 @@ export type Resolved = { ws?: WorkspaceNode; tab?: TabNode; pane?: PaneNode };
 const pick = <T extends { focused?: boolean }>(items: T[], match: (x: T) => boolean): T | undefined =>
   items.find(match) ?? items.find((x) => x.focused) ?? items[0];
 
-/**
- * The workspace, tab and pane to show for a selection. Anything selected that no longer exists
- * (closed, or not chosen yet) falls back to what Herdr has focused, then to the first one.
- */
 export function resolveSelection(tree: WorkspaceNode[], sel: Selection): Resolved {
   const ws = pick(tree, (w) => w.workspace_id === sel.workspaceId);
   const tab = ws ? pick(ws.tabs, (t) => t.tab_id === sel.tabId) : undefined;
@@ -20,7 +15,6 @@ export function resolveSelection(tree: WorkspaceNode[], sel: Selection): Resolve
   return { ws, tab, pane };
 }
 
-/** The selection that shows one pane, wherever it is. */
 export function selectionForPane(tree: WorkspaceNode[], paneId: string): Selection | null {
   for (const w of tree) {
     for (const t of w.tabs) {
@@ -32,7 +26,6 @@ export function selectionForPane(tree: WorkspaceNode[], paneId: string): Selecti
 
 const RANK: Record<string, number> = { blocked: 4, working: 3, done: 2, idle: 1 };
 
-/** The most urgent of several agent statuses: blocked > working > done > idle; undefined if none. */
 export function rollup(statuses: (string | undefined)[]): string | undefined {
   let best: string | undefined;
   for (const s of statuses) {
@@ -41,7 +34,6 @@ export function rollup(statuses: (string | undefined)[]): string | undefined {
   return best;
 }
 
-/** A pane's agent status, preferring live events over the last snapshot. */
 export const paneStatus = (p: PaneNode, agents: AgentMap): string | undefined =>
   agents.get(p.pane_id)?.status ?? p.agent_status;
 
@@ -58,9 +50,7 @@ export function workspaceSummary(w: WorkspaceNode, agents: AgentMap): WorkspaceS
 }
 
 export const workspaceName = (w: WorkspaceNode) => w.label || `Workspace ${w.number ?? w.workspace_id}`;
-/** Herdr labels unnamed tabs with their number; show those as "Tab n". */
 export const tabName = (t: TabNode) =>
   t.label && t.label !== String(t.number) ? t.label : `Tab ${t.number ?? t.tab_id}`;
-/** A short pane label: its own label, else the agent or terminal title, else its id. */
 export const paneName = (p: PaneNode, agents?: AgentMap) =>
   p.label || agents?.get(p.pane_id)?.agent || p.agent || p.terminal_title_stripped || p.pane_id;

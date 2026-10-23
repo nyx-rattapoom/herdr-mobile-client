@@ -14,11 +14,6 @@ const tone: Record<PillKind, { bg: string; fg: string }> = {
   offline: { bg: '#3a1518', fg: '#ffd6d7' },
 };
 
-/**
- * A pill floating at the top of the pane output: working (with elapsed time), needs you,
- * reconnecting or offline. Connection states retry on tap. It sits top-centre so it never
- * covers the / button, which starts bottom-right.
- */
 export function StatusPill({
   live,
   paneId,
@@ -32,7 +27,6 @@ export function StatusPill({
   const agent = st.agents.get(paneId)?.status;
   const since = st.since.get(paneId);
   const [now, setNow] = useState(() => Date.now());
-  // Timers keep running in the background while monitoring; don't tick for nobody there.
   const [foreground, setForeground] = useState(AppState.currentState !== 'background');
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => setForeground(s !== 'background'));

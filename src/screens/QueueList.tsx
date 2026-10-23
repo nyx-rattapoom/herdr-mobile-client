@@ -5,7 +5,6 @@ import { describeActionError } from '../live/actions';
 import type { PromptQueues, QueueItem } from '../live/promptQueue';
 import { colors, styles } from './ui';
 
-/** The pane's queued prompts, under the composer: edit, reorder, delete or send one now. */
 export function QueueList({ queue, paneId, onSent }: { queue: PromptQueues; paneId: string; onSent: () => void }) {
   const items = useSyncExternalStore(
     (cb) => queue.subscribe(cb),

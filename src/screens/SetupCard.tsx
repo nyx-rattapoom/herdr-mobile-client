@@ -8,7 +8,6 @@ export type SetupState =
 
 type Props = { state: SetupState; host: string; user: string; onInstall: () => void; onStart: () => void };
 
-/** Offers to install Herdr (official installer) or start its server when the server has none running. */
 export function SetupCard({ state, host, user, onInstall, onStart }: Props) {
   const install = state.kind === 'install';
   return (

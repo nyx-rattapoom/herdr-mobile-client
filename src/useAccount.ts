@@ -29,7 +29,6 @@ const vaultKv: KeyValueStore = {
 
 export type Credentials = { password?: string; privateKey?: string };
 
-// App-wide singletons: one settings object, one secrets store.
 const current: Settings = { biometric: false, secureScreen: false };
 const settingsReady = loadSettings(plainKv).then((s) => {
   Object.assign(current, s);
@@ -57,7 +56,6 @@ export function useAccount() {
         SecureStore.canUseBiometricAuthentication();
       setBiometricAvailable(ok);
     })();
-    // Re-lock the biometric vault whenever the app leaves the foreground.
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'background') secrets.lock();
     });
@@ -69,7 +67,6 @@ export function useAccount() {
   const createKey = useCallback(async () => setPublicKey(await deviceKey.ensure(keyComment)), []);
   const regenerateKey = useCallback(async () => setPublicKey(await deviceKey.regenerate(keyComment)), []);
 
-  /** Credentials to try for a server: device key first when configured, saved password as fallback. */
   const credentialsFor = useCallback(
     async (server: ServerProfile): Promise<Credentials> => {
       const password = (await servers.password(server.id)) ?? undefined;
@@ -99,7 +96,6 @@ export function useAccount() {
           throw e;
         }
       } else {
-        // Turning protection off must be re-authorised now, not ride on an earlier unlock.
         const auth = await LocalAuthentication.authenticateAsync({ promptMessage: 'Turn off credential protection' });
         if (!auth.success) throw new Error('Biometric confirmation was cancelled.');
         if (!(await secrets.disableBiometric())) {

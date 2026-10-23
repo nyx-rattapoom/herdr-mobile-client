@@ -17,7 +17,6 @@ type Props = {
   onShareKey: () => void;
   onRegenerateKey: () => void;
   onToggleBiometric: (on: boolean) => void;
-  /** Newest first. */
   audit: AuditEntry[];
   onClearAudit: () => void;
 };
@@ -28,7 +27,6 @@ const when = (t: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-/** Closes, quick answers and other approvals, recorded on this device only. */
 function ActivityLog({ entries, onClear }: { entries: AuditEntry[]; onClear: () => void }) {
   return (
     <View style={styles.card} testID="audit-log">

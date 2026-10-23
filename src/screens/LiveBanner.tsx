@@ -11,10 +11,8 @@ export const liveLabel: Record<LiveStatus, [string, string]> = {
   unsupported: ['not supported', colors.danger],
 };
 
-/** The SSH session behind this view is gone: retrying the view can't help until it is replaced. */
 export const sessionLost = (st: LiveState) => st.status !== 'live' && st.errorCode === 'ERR_NO_SESSION';
 
-/** "● live · herdr 0.9.3" plus anything after it, e.g. the host. */
 export function LiveStatusLine({ st, testID, extra }: { st: LiveState; testID?: string; extra?: string }) {
   const [label, color] = liveLabel[st.status];
   const version = st.snapshot?.version ?? st.server?.version;
@@ -27,7 +25,6 @@ export function LiveStatusLine({ st, testID, extra }: { st: LiveState; testID?: 
   );
 }
 
-/** What to do when the live view isn't live: retry, reconnect SSH, or the too-old alert. */
 export function LiveBanner({
   live,
   st,

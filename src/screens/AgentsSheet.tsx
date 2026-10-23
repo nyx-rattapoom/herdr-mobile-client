@@ -9,7 +9,6 @@ import { BottomSheet } from './Sheet';
 import { StatusDot } from './SessionsScreen';
 import { colors, sheet, styles } from './ui';
 
-/** Header button: the number of agents, amber while any of them needs the user. */
 export function AgentsButton({ live, flags, onPress }: { live: LiveSession; flags?: PaneFlags; onPress: () => void }) {
   const st = useLive(live);
   useFlags(flags);
@@ -37,12 +36,10 @@ export function AgentsButton({ live, flags, onPress }: { live: LiveSession; flag
 
 const noop = () => () => {};
 const zero = () => 0;
-/** Re-renders when pin/mute/snooze marks change (including a snooze running out). */
 function useFlags(flags?: PaneFlags) {
   useSyncExternalStore(flags ? (cb) => flags.subscribe(cb) : noop, flags ? flags.getVersion : zero);
 }
 
-/** Every agent in the session, grouped most urgent first; shared by the sheet and the side panel. */
 export function AgentList({
   live,
   viewed,
@@ -55,9 +52,7 @@ export function AgentList({
   viewed: Record<string, number>;
   flags?: PaneFlags;
   onOpen: (r: AgentRow) => void;
-  /** Pane actions: pin, mute, snooze, close… */
   onLongPress: (r: AgentRow) => void;
-  /** The pane on screen, highlighted in the side panel. */
   current?: string;
 }) {
   const st = useLive(live);
@@ -65,8 +60,6 @@ export function AgentList({
   const rows = agentRows(st.tree, st.agents, st.since, viewed, flags);
   const snoozed = flags ? [...st.agents.keys()].filter((p) => flags.isSnoozed(p)) : [];
   const [openedAt] = useState(() => Date.now());
-  // A long-press acts when the finger lifts: closing this sheet mid-gesture would leave the touch
-  // responder on a removed view, and the next sheet would lose its first tap.
   const longPressed = useRef<AgentRow | null>(null);
   return (
     <ScrollView>
@@ -143,7 +136,6 @@ export function AgentList({
   );
 }
 
-/** The agent list as a bottom sheet. */
 export function AgentsSheet({
   live,
   viewed,

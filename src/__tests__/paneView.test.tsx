@@ -15,7 +15,6 @@ describe('scrollbackHeader', () => {
 
   it('marks the start of scrollback only for panes without an agent', () => {
     expect(scrollbackHeader(out(false), false, { kind: 'idle' })).toBe('start');
-    // A full-screen agent's untruncated read is just its screen.
     expect(scrollbackHeader(out(false), true, { kind: 'idle' })).toBe('load-history');
   });
 
@@ -36,7 +35,6 @@ describe('scrollbackHeader', () => {
 });
 
 describe('PaneView history', () => {
-  // Polling and list batching run on timers; keep them from outliving the test.
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => {
     jest.clearAllTimers();
@@ -65,7 +63,6 @@ describe('PaneView history', () => {
       r.root.findByProps({ testID }).props.onPress();
     });
   };
-  /** Each outermost Text's full string, nested Text included. */
   const texts = (r: ReactTestRenderer) => {
     const flat = (c: unknown): string =>
       typeof c === 'string' || typeof c === 'number'
@@ -132,7 +129,6 @@ describe('PaneView kept rows', () => {
     jest.useRealTimers();
   });
 
-  // Claude Code (fullscreen) polled once a second: it works, then asks for permission.
   const dir = join(__dirname, 'fixtures', 'claude-fullscreen', 'popup');
   const frames = readdirSync(dir)
     .sort()
@@ -152,7 +148,6 @@ describe('PaneView kept rows', () => {
       });
     }
     const data = r!.root.findByProps({ testID: 'pane-output' }).props.data as unknown[];
-    // 14 rows scrolled off above the 40-row screen.
     expect(data).toHaveLength(14 + 40);
     expect(r!.root.findByProps({ testID: 'history-busy' }).props.children).toBe(
       'Earlier output loads when the agent is idle',
@@ -199,14 +194,12 @@ describe('PaneView following the end', () => {
     });
     const list = () => r!.root.findByProps({ testID: 'pane-output' }).props;
     const latest = () => r!.root.findAllByProps({ testID: 'jump-bottom' }).length > 0;
-    // An animated scroll to the end that falls short as the output grows.
     act(() => list().onScroll(scrolled(1200)));
     expect(latest()).toBe(false);
     act(() => list().onScrollBeginDrag());
     act(() => list().onScroll(scrolled(900)));
     act(() => list().onScrollEndDrag());
     expect(latest()).toBe(true);
-    // Still not following while the fling carries on, and back once at the end.
     act(() => list().onMomentumScrollBegin());
     act(() => list().onScroll(scrolled(800)));
     act(() => list().onMomentumScrollEnd());
@@ -228,11 +221,9 @@ describe('PaneView following the end', () => {
     act(() => list().onScrollBeginDrag());
     act(() => list().onScroll(scrolled(900)));
     act(() => list().onScrollEndDrag());
-    // The fling is cut short and onMomentumScrollEnd never comes.
     act(() => list().onMomentumScrollBegin());
     act(() => r!.root.findByProps({ testID: 'jump-bottom' }).props.onPress());
     expect(latest()).toBe(false);
-    // The scroll to the end falls short as the output grows: still following.
     act(() => list().onScroll(scrolled(1300)));
     expect(latest()).toBe(false);
     act(() => r!.unmount());

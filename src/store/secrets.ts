@@ -2,20 +2,9 @@ import type { KeyValueStore } from '../ssh/pinning';
 
 const VAULT_KEY = 'vault.v1';
 
-/**
- * Secrets (server passwords, the device private key). Without biometrics, each lives in its own
- * Keystore-backed SecureStore item. With biometrics, all of them live in one blob in a store
- * that requires user authentication, so one prompt unlocks them; the decrypted blob is cached in
- * memory until `lock()` (called when the app goes to the background). Android invalidates the
- * protected key when enrolled biometrics change; the blob then reads as null.
- */
 export class Secrets implements KeyValueStore {
   private cache: Record<string, string> | null = null;
 
-  /**
-   * @param ready resolves once settings are loaded; every operation waits for it so a secret
-   *   written during startup can't land in the plain store while biometrics are on.
-   */
   constructor(
     private readonly plain: KeyValueStore,
     private readonly vault: KeyValueStore,
@@ -56,7 +45,6 @@ export class Secrets implements KeyValueStore {
     this.cache = blob;
   }
 
-  /** Moves the given secrets into the protected vault (one write) and removes the plain copies. */
   async enableBiometric(keys: string[]): Promise<void> {
     const blob: Record<string, string> = {};
     for (const k of keys) {
@@ -68,10 +56,6 @@ export class Secrets implements KeyValueStore {
     for (const k of keys) await this.plain.deleteItem(k);
   }
 
-  /**
-   * Moves everything back to plain items. Reads the vault afresh (never the in-memory cache), so
-   * Android requires a new authentication. Returns false if the vault could not be read.
-   */
   async disableBiometric(): Promise<boolean> {
     this.cache = null;
     const raw = await this.readVault();
@@ -102,7 +86,6 @@ export class Secrets implements KeyValueStore {
   }
 }
 
-/** The protected vault is missing or was invalidated (e.g. biometrics changed). */
 export class SecretsUnavailable extends Error {
   constructor() {
     super('Saved credentials are locked or were invalidated (biometrics changed). Re-enter passwords and recreate the device key.');

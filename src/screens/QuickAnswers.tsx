@@ -7,13 +7,8 @@ import { FALLBACK_KEYS, answerSteps, parseChoices, type InputStep } from '../liv
 import type { LiveSession } from '../live/LiveSession';
 import { colors, styles } from './ui';
 
-/** Pause between the requests of one answer, so the agent handles them in order. */
 const STEP_GAP_MS = 150;
 
-/**
- * Answer buttons for a blocked agent, read from the options on its screen. Each answer asks for
- * confirmation first. When nothing parses, Enter / Esc / ↑ / ↓ are offered instead.
- */
 export function QuickAnswers({
   live,
   paneId,
@@ -27,7 +22,6 @@ export function QuickAnswers({
   agent?: string;
   screen: Line[];
   onSent: () => void;
-  /** Called after an answer was sent (for the audit log). */
   onAnswered?: (label: string) => void;
 }) {
   const set = useMemo(() => parseChoices(screen), [screen]);

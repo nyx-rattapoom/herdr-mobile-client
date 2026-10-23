@@ -25,22 +25,14 @@ import { colors, styles } from './ui';
 type Props = {
   live: LiveSession;
   paneId: string;
-  /** Identifies this pane's draft (see drafts.ts). */
   draftKey: string;
-  /** The pane runs a detected agent; enables the agent-prompt mode. */
   hasAgent: boolean;
-  /** A blocked agent wants an answer typed into the pane, not a new prompt. */
   agentBlocked?: boolean;
-  /** Re-read output right after input so the echo shows up quickly. */
   onSent: () => void;
-  /** The pane has nothing on screen yet. */
   paneBlank?: boolean;
-  /** The pane's parsed output, for answer options while the agent is blocked. */
   screen?: Line[];
   agentName?: string;
-  /** Called after a quick answer was sent. */
   onAnswered?: (label: string) => void;
-  /** The session's prompt queue: agent prompts wait here while the agent works. */
   queue?: PromptQueues;
   agentStatus?: string;
 };
@@ -48,11 +40,6 @@ type Props = {
 type Mode = 'submit' | 'type' | 'prompt';
 const modeLabel: Record<Mode, string> = { submit: 'Line ⏎', type: 'Text only', prompt: 'Agent prompt' };
 
-/**
- * Multi-line input for a pane: agent prompts, lines (with Enter) or raw text, plus special keys
- * behind the ⌨ button. The draft is kept per pane while the app runs; the expand button opens a
- * full-screen editor on the same draft.
- */
 export function Composer({
   live,
   paneId,
@@ -73,13 +60,10 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  // For sudo/password prompts: hide what is typed, keep it out of suggestions and out of drafts.
   const [hidden, setHidden] = useState(false);
-  /** One-shot Ctrl/Alt: applies to the next key or typed character, then resets. */
   const [armed, setArmed] = useState<Modifier | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const modes: Mode[] = hasAgent ? ['prompt', 'submit', 'type'] : ['submit', 'type'];
-  // Landscape phones: keep the input short so the pane stays visible.
   const short = useWindowDimensions().height < 500;
   const insets = useSafeAreaInsets();
 
@@ -89,7 +73,6 @@ export function Composer({
       const ch = appendedChar(text, t);
       const key = ch ? modifiedChar(armed, ch) : null;
       if (key) {
-        // The character goes to the pane as a key combination instead of into the input.
         void send(keyRequest(paneId, key), false);
         return;
       }
@@ -139,8 +122,6 @@ export function Composer({
 
   const submit = async () => {
     if (!text && mode !== 'submit') return;
-    // While the agent works or waits for an answer (or earlier prompts still wait), agent prompts
-    // join the queue. A blocked agent's queue stays paused, so this never answers its question.
     const busyAgent = agentStatus === 'working' || agentStatus === 'blocked';
     if (mode === 'prompt' && queue && (busyAgent || queue.items(paneId).length > 0)) {
       try {
@@ -192,7 +173,6 @@ export function Composer({
           {note}
         </Text>
       ) : mode === 'prompt' && paneBlank ? (
-        // Herdr can report an agent as idle before its UI is drawn; a prompt sent then is lost.
         <Text testID="input-not-ready" style={[styles.muted, { marginBottom: 6 }]}>
           The agent hasn&apos;t drawn anything yet. A prompt sent now may be lost; wait for its screen to appear.
         </Text>
@@ -274,7 +254,6 @@ export function Composer({
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
-          // Single-line hidden input submits on Enter; multi-line Enter adds a newline.
           onSubmitEditing={hidden ? () => void submit() : undefined}
           blurOnSubmit={false}
         />
@@ -301,8 +280,6 @@ export function Composer({
       {queue ? <QueueList queue={queue} paneId={paneId} onSent={onSent} /> : null}
       {expanded ? (
         <Modal statusBarTranslucent navigationBarTranslucent animationType="slide" onRequestClose={() => setExpanded(false)}>
-          {/* The modal window is edge-to-edge and outside the root SafeAreaView: pad for the system
-              bars here, outside the KeyboardAvoidingView, which overwrites its own paddingBottom. */}
           <View
             style={[
               styles.screen,

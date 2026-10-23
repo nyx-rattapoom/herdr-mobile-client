@@ -48,7 +48,6 @@ describe('parseSlashMenu', () => {
       { name: '/project:deploy', description: 'Run the deploy script' },
     ]);
     expect(parseSlashMenu('│ /help │\n│ /quit │').map((c) => c.name)).toEqual(['/help', '/quit']);
-    // One bare `/word` on its own is too weak a signal.
     expect(parseSlashMenu('/tmp\nsomething')).toEqual([]);
     expect(parseSlashMenu('   /home/herdr/demo       8.2K (4%)  ctrl+p commands')).toEqual([]);
   });
@@ -88,7 +87,6 @@ describe('SlashMenu', () => {
   });
 
   it('loads more by moving to the last seen command, then stepping until it wraps', async () => {
-    // A 14-command menu showing 10 rows at a time that scrolls with the selection and wraps.
     const all = Array.from({ length: 14 }, (_, i) => `/cmd${i}`);
     let cursor = 0;
     const screen = () => {
@@ -139,7 +137,6 @@ describe('SlashMenu', () => {
     };
     const menu = new SlashMenu(query, 'w1:p1', async () => {}, 0, 1);
     await menu.open();
-    // From row 9, five down lands on row 0 again: /cmd10–13 were never on screen.
     expect((await menu.more(10, 5)).map((c) => c.name)).toEqual(all);
     expect(menu.complete).toBe(true);
     expect(keys).toEqual(['down×9', 'down×5', 'up×5', 'down×1', 'down×1', 'down×1', 'down×1', 'down×1']);
@@ -165,7 +162,6 @@ describe('SlashMenu', () => {
         stale = true;
       }
       if (method !== 'pane.read') return {} as T;
-      // The first read after a key press still shows the old page.
       if (!stale) shown = cursor;
       stale = false;
       return { read: { text: page(shown) } } as T;

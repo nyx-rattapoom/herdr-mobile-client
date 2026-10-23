@@ -47,19 +47,13 @@ export type PaneNode = PaneRecord & { agent?: string };
 export type TabNode = TabRecord & { panes: PaneNode[] };
 export type WorkspaceNode = WorkspaceRecord & { tabs: TabNode[] };
 
-/** Per-kind cap on snapshot records; a real session is far smaller. */
 export const MAX_RECORDS = 1000;
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-/** Display text from the server: sanitised and length-limited. */
 const label = (v: unknown, max = 80) => cleanLabel(v, max);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
 
-/**
- * Keeps at most MAX_RECORDS objects whose id fields are strings, and copies only the known fields
- * with the expected types, so nothing unexpected reaches the UI.
- */
 function records<T>(v: unknown, ids: string[], pick: (o: Record<string, unknown>) => T): T[] {
   if (!Array.isArray(v)) return [];
   const out: T[] = [];
@@ -123,7 +117,6 @@ export async function fetchSnapshot(client: HerdrClient): Promise<SessionSnapsho
 const byNumber = (a: { number?: number }, b: { number?: number }) =>
   (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER);
 
-/** Nests workspaces → tabs → panes. Records whose parent is missing are dropped. */
 export function buildTree(s: SessionSnapshot): WorkspaceNode[] {
   const agentByPane = new Map(s.agents.map((a) => [a.pane_id, a]));
   const panesByTab = new Map<string, PaneNode[]>();

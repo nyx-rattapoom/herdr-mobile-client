@@ -2,36 +2,24 @@ import { lineText, type Line, type Style } from './ansi';
 
 export type Choice = { label: string; index: number; key?: string };
 
-/**
- * Answer options found on an agent's screen:
- * - `vertical`: a numbered or lettered list, one option per line, moved through with ↑/↓;
- * - `horizontal`: a row of buttons on one line, moved through with ←/→;
- * - `yesno`: a `[y/n]`-style prompt answered by typing the letter.
- */
 export type ChoiceSet = {
   layout: 'vertical' | 'horizontal' | 'yesno';
   choices: Choice[];
-  /** The highlighted option, when the screen shows one. */
   selected: number | null;
-  /** Up to three lines above the options, for context. */
   context: string[];
 };
 
-/** One request to the pane: keys, or literal text. */
 export type InputStep = { keys: string[] } | { text: string };
 
-/** How many lines from the bottom of the screen to look at. */
 const WINDOW = 30;
 const BORDER = /^[\s│┃║|▌▐▕]+|[\s│┃║|▌▐▕]+$/g;
 const MARKER = /^[❯›>▶►●◉]\s*/;
 const VERTICAL = /^([❯›>▶►●◉○◯]\s*)?(?:\[|\()?(\d{1,2}|[a-zA-Z])(?:[.)\]:])\s+(\S.*)$/;
 const YESNO = /[[(](y\/n|Y\/n|y\/N|yes\/no|Yes\/No)[\])]/;
-/** Key hints agents print under button rows. */
 const HINT = /select|confirm|enter|⇆|←|→|tab\b/i;
 
 const strip = (s: string) => s.replace(BORDER, '');
 
-/** Background (or inverse) of the visible text in a span, as a comparable key. */
 const shade = (st: Style) => (st.inverse ? `inv:${st.fg ?? ''}` : (st.bg ?? ''));
 
 function contextAbove(lines: string[], at: number): string[] {
@@ -43,7 +31,6 @@ function contextAbove(lines: string[], at: number): string[] {
   return out;
 }
 
-/** The last run of consecutive list lines numbered 1, 2, 3… or lettered a, b, c… */
 function findVertical(texts: string[]): ChoiceSet | null {
   let best: { start: number; choices: Choice[]; selected: number | null } | null = null;
   for (let i = 0; i < texts.length; i++) {
@@ -73,10 +60,6 @@ function findVertical(texts: string[]): ChoiceSet | null {
 
 const nextKey = (k: string) => (/\d/.test(k) ? String(Number(k) + 1) : String.fromCharCode(k.charCodeAt(0) + 1));
 
-/**
- * Segments of a line separated by 3+ spaces, with the shade of each segment's text, and the
- * shade of the gaps between segments (the row's background).
- */
 function segments(line: Line): { segs: { text: string; shade: string }[]; gapShade: string } {
   const out: { text: string; shade: string; gap: number }[] = [];
   let cur: { text: string; shade: string; gap: number } | null = null;
@@ -103,7 +86,6 @@ function segments(line: Line): { segs: { text: string; shade: string }[]; gapSha
   return { segs: out.map(({ text, shade }) => ({ text: text.trim(), shade })), gapShade };
 }
 
-/** A row of 2–5 short buttons near a key hint, e.g. `Allow once   Allow always   Reject`. */
 function findHorizontal(lines: Line[], texts: string[]): ChoiceSet | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const { segs, gapShade } = segments(lines[i]);
@@ -112,7 +94,6 @@ function findHorizontal(lines: Line[], texts: string[]): ChoiceSet | null {
     const near = texts.slice(Math.max(0, i - 6), i + 4).join('\n');
     if (!HINT.test(texts.slice(i + 1, i + 4).join('\n')) && !/\?|permission|allow|approve|continue/i.test(near))
       continue;
-    // The highlighted button is the only one drawn on a different shade from the row.
     const lit = segs.flatMap((s, k) => (s.shade !== gapShade ? [k] : []));
     const selected = lit.length === 1 ? lit[0] : null;
     return {
@@ -142,10 +123,6 @@ function findYesNo(texts: string[]): ChoiceSet | null {
   return null;
 }
 
-/**
- * Answer options on the last screen of a pane (its bottom WINDOW lines), or null when none
- * are recognisable. Agent-agnostic: it knows common shapes, not particular agents.
- */
 export function parseChoices(screen: Line[]): ChoiceSet | null {
   let end = screen.length;
   while (end > 0 && !lineText(screen[end - 1]).trim()) end--;
@@ -154,7 +131,6 @@ export function parseChoices(screen: Line[]): ChoiceSet | null {
   return findVertical(texts) ?? findHorizontal(lines, texts) ?? findYesNo(texts);
 }
 
-/** The input that picks `target`: arrow keys from the highlighted option, a typed key, then Enter. */
 export function answerSteps(set: ChoiceSet, target: number): InputStep[] {
   const choice = set.choices[target];
   if (set.layout === 'yesno') return [{ text: choice.key as string }, { keys: ['enter'] }];
@@ -168,7 +144,6 @@ export function answerSteps(set: ChoiceSet, target: number): InputStep[] {
   return steps;
 }
 
-/** Keys offered when nothing on screen parses as options. */
 export const FALLBACK_KEYS = [
   { key: 'enter', label: '⏎ Enter' },
   { key: 'esc', label: 'Esc' },

@@ -19,7 +19,6 @@ function hex(n: number): string {
   return n.toString(16).padStart(2, '0');
 }
 
-/** xterm 256-colour palette. */
 export function color256(n: number): string | undefined {
   if (!Number.isInteger(n) || n < 0 || n > 255) return undefined;
   if (n < 16) return BASE16[n];
@@ -67,17 +66,11 @@ function applySgr(style: Style, params: number[]): Style {
       else s.bg = c;
     }
   }
-  // Drop undefined keys so styles compare cleanly.
   return Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as Style;
 }
 
 const sameStyle = (a: Style, b: Style) => JSON.stringify(a) === JSON.stringify(b);
 
-/**
- * Parses terminal text with ANSI escapes into styled lines. Only SGR is interpreted; other
- * CSI, OSC and two-byte escapes are removed. CR handling is line-oriented: `\r\n` ends a line
- * and a lone `\r` is dropped.
- */
 export function parseAnsi(input: string): Line[] {
   const lines: Line[] = [];
   let line: Line = [];
@@ -108,12 +101,10 @@ export function parseAnsi(input: string): Line[] {
         }
         i = j;
       } else if (next === ']') {
-        // OSC: terminated by BEL or ST (ESC \).
         let j = i + 2;
         while (j < input.length && input[j] !== '\x07' && !(input[j] === '\x1b' && input[j + 1] === '\\')) j++;
         i = input[j] === '\x07' ? j : j + 1;
       } else {
-        // nF / Fp escapes: optional intermediates (0x20–0x2f), then one final byte.
         let j = i + 1;
         while (j < input.length && input.charCodeAt(j) >= 0x20 && input.charCodeAt(j) <= 0x2f) j++;
         i = j;
@@ -123,7 +114,6 @@ export function parseAnsi(input: string): Line[] {
       lines.push(line);
       line = [];
     } else if (ch === '\r' || (ch < ' ' && ch !== '\t') || isInvisibleControl(ch)) {
-      // Dropped: lone CR, BEL, other C0/C1 controls, bidi overrides and isolates.
     } else {
       buf += ch;
     }
@@ -133,11 +123,9 @@ export function parseAnsi(input: string): Line[] {
   return lines;
 }
 
-/** DEL, C1 controls and bidi overrides/isolates (U+202A–202E, U+2066–2069). */
 function isInvisibleControl(ch: string): boolean {
   const c = ch.charCodeAt(0);
   return (c >= 0x7f && c <= 0x9f) || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
 }
 
-/** Plain text of a parsed line. */
 export const lineText = (l: Line) => l.map((s) => s.text).join('');

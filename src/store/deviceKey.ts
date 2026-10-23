@@ -5,10 +5,6 @@ const PUBLIC_KEY = 'devicekey.pub';
 
 export type Generated = { privateKey: string; publicKey: string };
 
-/**
- * One Ed25519 key per device, generated on the device. The public half is kept in plain
- * storage so it can be shown and copied without unlocking; the private half is a secret.
- */
 export class DeviceKeyStore {
   constructor(
     private readonly plain: KeyValueStore,
@@ -24,14 +20,12 @@ export class DeviceKeyStore {
     return this.secrets.getItem(DEVICE_KEY_SECRET);
   }
 
-  /** Returns the existing public key or creates a new key pair. */
   async ensure(comment: string): Promise<string> {
     const existing = await this.publicKey();
     if (existing) return existing;
     return this.create(comment);
   }
 
-  /** Replaces the key pair. Servers that trusted the old key must be updated. */
   async regenerate(comment: string): Promise<string> {
     await this.secrets.deleteItem(DEVICE_KEY_SECRET);
     await this.plain.deleteItem(PUBLIC_KEY);
@@ -47,7 +41,6 @@ export class DeviceKeyStore {
   }
 }
 
-/** SHA-256 fingerprint text is computed server-side by ssh-keygen; here we show a short form. */
 export function shortKey(pub: string): string {
   const [type, b64 = '', comment = ''] = pub.split(' ');
   return `${type} …${b64.slice(-12)} ${comment}`.trim();

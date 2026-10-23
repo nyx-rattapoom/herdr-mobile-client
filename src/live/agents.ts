@@ -1,7 +1,6 @@
 import type { SessionSnapshot } from '../protocol/snapshot';
 
 export type AgentState = { status: string; agent?: string; workspaceId?: string; title?: string };
-/** pane_id → current agent state, for panes that have an agent. */
 export type AgentMap = Map<string, AgentState>;
 
 export type AgentAlert = {
@@ -28,13 +27,6 @@ export function agentsFromSnapshot(s: SessionSnapshot): AgentMap {
 
 const FINISHED = new Set(['idle', 'done']);
 
-/**
- * Alerts for transitions between two agent maps:
- * - blocked: an agent enters `blocked` (it needs the user).
- * - completed: a `working` agent becomes idle/done, or disappears (Herdr drops idle agents
- *   from the agent list).
- * Transitions that skip `working` (e.g. unknown → idle) are not completions.
- */
 export function agentAlerts(prev: AgentMap, next: AgentMap): AgentAlert[] {
   const out: AgentAlert[] = [];
   for (const [paneId, n] of next) {

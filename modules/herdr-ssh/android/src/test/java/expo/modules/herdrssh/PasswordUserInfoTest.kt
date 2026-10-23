@@ -22,7 +22,6 @@ class PasswordUserInfoTest {
     assertNull(ask(ui, "Verification code: "))
     assertNull(ask(ui, "One-time password (OTP)?", echo = true))
     assertNull(ui.promptKeyboardInteractive("d", "", "", arrayOf("Password:", "Code:"), booleanArrayOf(false, false)))
-    // Still answers a real password prompt afterwards.
     assertArrayEquals(arrayOf("s3cret"), ask(ui, "herdr@host's password:"))
   }
 

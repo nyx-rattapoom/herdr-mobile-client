@@ -1,9 +1,7 @@
 import type { HostKeyInfo } from '../../modules/herdr-ssh';
 
-/** A host key the user explicitly confirmed for one host:port. */
 export type HostKeyPin = {
   algorithm: string;
-  /** Base64 key blob. Comparison is on the full blob, not the fingerprint. */
   key: string;
   fingerprint: string;
   pinnedAt: number;
@@ -20,19 +18,16 @@ export function decidePin(pin: HostKeyPin | null, presented: HostKeyInfo): PinDe
   return { kind: 'mismatch', pin, presented };
 }
 
-/** Minimal key/value storage; SecureStore in the app, a Map in tests. */
 export interface KeyValueStore {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   deleteItem(key: string): Promise<void>;
 }
 
-/** Pins are scoped to the exact endpoint the user typed. */
 export function endpointId(host: string, port: number): string {
   return `${host.trim().toLowerCase()}:${port}`;
 }
 
-/** SecureStore keys allow only [A-Za-z0-9._-]. */
 function storageKey(host: string, port: number, prefix = 'pin'): string {
   const id = endpointId(host, port);
   let hex = '';
@@ -40,10 +35,8 @@ function storageKey(host: string, port: number, prefix = 'pin'): string {
   return `${prefix}.${hex}`;
 }
 
-/** A pin the user removed with "Forget host key", kept so the next confirmation can show it. */
 export type ForgottenPin = { algorithm: string; fingerprint: string; forgottenAt: number };
 
-/** Where to read the server's own fingerprint for a key type (shown on the confirm screen). */
 export function hostKeyFileHint(algorithm: string): string {
   const file = algorithm.includes('ed25519')
     ? 'ssh_host_ed25519_key.pub'
@@ -73,10 +66,6 @@ export class PinStore {
     }
   }
 
-  /**
-   * Records a key the user confirmed. Refuses to replace a different existing pin; the user must
-   * forget the old pin first, so a mismatch can never be silently accepted.
-   */
   async pin(host: string, port: number, key: HostKeyInfo): Promise<HostKeyPin> {
     const existing = await this.get(host, port);
     if (existing && existing.key !== key.key) {
@@ -89,7 +78,6 @@ export class PinStore {
     return pin;
   }
 
-  /** Removes the pin, remembering its fingerprint for the next confirmation screen. */
   async forget(host: string, port: number): Promise<void> {
     const old = await this.get(host, port);
     if (old) {
@@ -99,7 +87,6 @@ export class PinStore {
     await this.kv.deleteItem(storageKey(host, port));
   }
 
-  /** The most recently forgotten pin for this endpoint, if it has not been re-pinned since. */
   async previous(host: string, port: number): Promise<ForgottenPin | null> {
     try {
       const v = JSON.parse((await this.kv.getItem(storageKey(host, port, 'pinprev'))) ?? 'null');
@@ -109,7 +96,6 @@ export class PinStore {
     }
   }
 
-  /** Removing a server clears everything about its endpoint. */
   async purge(host: string, port: number): Promise<void> {
     await this.kv.deleteItem(storageKey(host, port));
     await this.kv.deleteItem(storageKey(host, port, 'pinprev'));

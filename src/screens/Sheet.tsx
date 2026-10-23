@@ -4,12 +4,6 @@ import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-conte
 
 import { sheet } from './ui';
 
-/**
- * Modal windows are edge-to-edge and don't get the root SafeAreaView's padding, so every overlay
- * keeps its content off the system bars itself. The backdrop still dims the whole screen; the
- * panel's background runs under the bottom bar while its rows stay above it. In landscape the
- * navigation bar can sit on either side, hence the left/right padding.
- */
 export function overlayInsets(insets: EdgeInsets, panelBottom: number = sheet.panel.paddingBottom) {
   return {
     backdrop: { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
@@ -17,10 +11,6 @@ export function overlayInsets(insets: EdgeInsets, panelBottom: number = sheet.pa
   };
 }
 
-/**
- * A bottom sheet in its own modal: tap outside to close. It never grows past the space between
- * the system bars; content that can get long goes in a ScrollView so it shrinks and scrolls.
- */
 export function BottomSheet({
   onClose,
   animation = 'slide',
@@ -40,7 +30,6 @@ export function BottomSheet({
   return (
     <Modal transparent statusBarTranslucent navigationBarTranslucent animationType={animation} onRequestClose={onClose}>
       <Pressable style={[sheet.backdrop, pad.backdrop]} onPress={onClose} testID={backdropTestID}>
-        {/* A Pressable (not a View) so taps inside the panel don't reach the backdrop. */}
         <Pressable style={[sheet.panel, { maxHeight: '100%' }, style, pad.panel]} testID={testID}>
           {children}
         </Pressable>
@@ -49,13 +38,10 @@ export function BottomSheet({
   );
 }
 
-/** A dialog centred in its own modal that moves up for the keyboard. */
 export function CenteredDialog({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const insets = useSafeAreaInsets();
   return (
     <Modal transparent statusBarTranslucent navigationBarTranslucent animationType="fade" onRequestClose={onClose}>
-      {/* The inset padding sits outside the KeyboardAvoidingView, which overwrites its own
-          paddingBottom; it then only adds the part of the keyboard above the navigation bar. */}
       <View
         style={[
           sheet.backdrop,

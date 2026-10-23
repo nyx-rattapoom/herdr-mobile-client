@@ -82,7 +82,6 @@ describe('LiveSession', () => {
     await Promise.resolve();
     expect(live.getState().agents.get('w1:p1')?.status).toBe('blocked');
     await settle(300);
-    // The follow-up snapshot agrees, so no duplicate alert.
     expect(alerts).toEqual([{ kind: 'blocked', paneId: 'w1:p1', agent: 'fake', workspaceId: 'w1' }]);
     setSnap(snap(['w1:p1'], []));
     server.emit(sub, 'pane.agent_status_changed', { pane_id: 'w1:p1', workspace_id: 'w1', agent_status: 'working' });
@@ -98,7 +97,6 @@ describe('LiveSession', () => {
     await settle(200);
     expect(live.getState().agents.get('w1:p1')?.status).toBe('blocked');
     expect(alerts).toEqual([]);
-    // Agent finishes and a new one blocks while the subscription is down.
     setSnap(snap(['w1:p1'], [{ pane_id: 'w1:p1', agent_status: 'working' }]));
     const sub = server.subscriptions[server.subscriptions.length - 1];
     server.emit(sub, 'pane_updated', {});
@@ -144,7 +142,6 @@ describe('LiveSession', () => {
     expect(live.getState()).toMatchObject({ status: 'reconnecting', errorCode: 'ERR_NO_SESSION' });
     expect(errors).toEqual([expect.objectContaining({ code: 'ERR_NO_SESSION' })]);
     server.failOpen = null;
-    // Cleared as soon as the session answers again, before the view is live.
     const codes: (string | undefined)[] = [];
     live.subscribe((s) => s.server && codes.push(s.errorCode));
     await settle(500);
@@ -155,7 +152,6 @@ describe('LiveSession', () => {
 
   it('ignores late failures from before retryNow(), so a new SSH session stays live', async () => {
     const { server } = setup();
-    // The first ping hangs on a dead SSH session and fails only after the retry succeeded.
     let failOld!: (e: unknown) => void;
     let first = true;
     const open = () => {
@@ -215,7 +211,6 @@ describe('LiveSession', () => {
     server.handlers['pane.read'] = () => ({ type: 'pane_read', read: { text: '' } });
     void live.start();
     await settle(200);
-    // Back-to-back reads: the second must not go out on the connection the first one's EOF is about to close.
     const a = live.query('pane.read', { pane_id: 'w1:p1' });
     await settle(1);
     const b = live.query('pane.read', { pane_id: 'w1:p1' });
@@ -227,7 +222,6 @@ describe('LiveSession', () => {
   });
 
   describe('against an older Herdr', () => {
-    // Herdr 0.7.5 knows every type the app subscribes to except workspace.reordered.
     const known075 = [...TREE_EVENTS.filter((t) => t !== 'workspace.reordered'), 'pane.agent_status_changed'];
     const subscribeAttempts = (server: FakeHerdr) =>
       server.connections.filter((c) => c.requests.some((r) => r.method === 'events.subscribe')).length;
@@ -263,7 +257,6 @@ describe('LiveSession', () => {
       const types = (sub.requests[0].params as { subscriptions: { type: string }[] }).subscriptions.map((s) => s.type);
       expect(types).not.toContain('workspace.reordered');
       expect(types).toContain('pane.agent_status_changed');
-      // Only the first subscription named it; resubscriptions (e.g. for new panes) leave it out.
       const named = server.connections
         .flatMap((c) => c.requests)
         .filter((r) => r.method === 'events.subscribe')
@@ -313,7 +306,6 @@ describe('LiveSession', () => {
     await expect(settled).resolves.toMatchObject({ status: 'live' });
     live.stop();
 
-    // Never started, so it stays connecting.
     const stuck = new LiveSession(server.open);
     const timedOut = stuck.whenSettled(1_000);
     await settle(1_200);

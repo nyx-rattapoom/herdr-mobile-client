@@ -11,7 +11,6 @@ export function useLive(live: LiveSession): LiveState {
   );
 }
 
-/** Last output per pane, so a pane shown again (or after a reconnect) starts from its last screen. */
 const lastOutput = new WeakMap<LiveSession, Map<string, PaneOutput>>();
 
 export function cachedOutput(live: LiveSession, paneId: string): PaneOutput | null {
@@ -39,8 +38,6 @@ export function usePaneOutput(live: LiveSession, paneId: string) {
     [live, paneId],
   );
 
-  // Polling is for the screen. Timers keep running in the background while monitoring, so pause
-  // there instead of reading the pane every second for nobody.
   useEffect(() => {
     const sync = (s: AppStateStatus) => (s === 'background' ? reader.stop() : reader.start());
     sync(AppState.currentState);

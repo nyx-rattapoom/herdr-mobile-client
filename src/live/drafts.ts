@@ -1,10 +1,5 @@
-/**
- * Unsent composer text per pane, kept in memory so it survives switching tabs, workspaces and
- * screens. Not persisted: a draft can hold secrets typed for a password prompt.
- */
 const drafts = new Map<string, string>();
 
-/** Most drafts kept; the oldest are dropped first. */
 export const MAX_DRAFTS = 100;
 
 export const draftKey = (serverId: string, session: string, paneId: string) => `${serverId}|${session}|${paneId}`;

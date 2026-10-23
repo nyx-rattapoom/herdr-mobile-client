@@ -4,25 +4,15 @@ import type { AgentMap } from './agents';
 
 export type QueueItem = { id: string; text: string };
 
-/** Per pane: waiting to send, sent and waiting for the agent to start, or waiting for it to finish. */
 type Phase = 'ready' | 'sent' | 'running';
 
-/** A prompt that never made the agent start working is given up on after this long. */
 export const START_TIMEOUT_MS = 20_000;
-/** Characters per stored chunk, keeping each secure-store value under 2 KB. */
 const CHUNK = 900;
-/** Most prompts queued per pane. */
 export const MAX_QUEUE = 20;
 
 const FINISHED = new Set(['idle', 'done']);
 const EMPTY: readonly QueueItem[] = Object.freeze([]);
 
-/**
- * Prompts waiting for a pane's agent to finish, per server profile + session. While an agent works,
- * prompts are queued on the phone. When it goes idle or done the first one is sent; the next waits
- * until the agent has worked and finished again. Nothing is sent while disconnected or while the
- * agent is blocked: a blocked agent is asking a question, and a queued prompt must never answer it.
- */
 export class PromptQueues {
   private queues = new Map<string, QueueItem[]>();
   private phase = new Map<string, { phase: Phase; at: number }>();
@@ -33,12 +23,10 @@ export class PromptQueues {
   private paused = '';
   private lastState: { live: string; agents: AgentMap } | null = null;
   private timers = new Set<ReturnType<typeof setTimeout>>();
-  /** A prune asked for before the stored queues were loaded. */
   private pendingPrune: Set<string> | null = null;
 
   constructor(
     private readonly kv: KeyValueStore,
-    /** server profile id + session name. */
     private readonly scope: string,
     private readonly send: (paneId: string, text: string) => Promise<void>,
     private readonly now: () => number = Date.now,
@@ -57,20 +45,16 @@ export class PromptQueues {
     this.listeners.forEach((l) => l());
   }
 
-  /** The pane's queue. Stable between changes (an empty queue is always the same array). */
   items(paneId: string): readonly QueueItem[] {
     return this.queues.get(paneId) ?? EMPTY;
   }
 
-  /** Why the queue isn't sending right now, if it isn't. */
   pausedReason(paneId: string): string | null {
     if (!this.items(paneId).length || !this.lastState) return null;
     if (this.lastState.live !== 'live') return 'Paused while disconnected.';
     if (this.lastState.agents.get(paneId)?.status === 'blocked') return 'Paused: the agent is waiting for an answer.';
     return null;
   }
-
-  // ---- persistence ------------------------------------------------------------------------
 
   async load(): Promise<void> {
     try {
@@ -85,7 +69,6 @@ export class PromptQueues {
         if (items.length) this.queues.set(paneId, items);
       }
     } catch {
-      // Unreadable index: start empty.
     }
     this.loaded = true;
     if (this.pendingPrune) await this.prune(this.pendingPrune);
@@ -126,8 +109,6 @@ export class PromptQueues {
     this.emit();
   }
 
-  // ---- editing ----------------------------------------------------------------------------
-
   async add(paneId: string, text: string): Promise<void> {
     const items = this.items(paneId);
     if (items.length >= MAX_QUEUE) throw new Error(`At most ${MAX_QUEUE} prompts can wait per pane.`);
@@ -166,7 +147,6 @@ export class PromptQueues {
     await this.saveIndex();
   }
 
-  /** Sends one item now, whatever the agent is doing, and removes it from the queue. */
   async sendNow(paneId: string, id: string): Promise<void> {
     const item = this.items(paneId).find((i) => i.id === id);
     if (!item) return;
@@ -175,10 +155,8 @@ export class PromptQueues {
     await this.remove(paneId, id);
   }
 
-  /** Drops queues of panes that no longer exist. */
   async prune(existing: Set<string>): Promise<void> {
     if (!this.loaded) {
-      // Pruning an empty, not-yet-loaded queue would save an empty index over the stored one.
       this.pendingPrune = existing;
       return;
     }
@@ -192,9 +170,6 @@ export class PromptQueues {
     this.emit();
   }
 
-  // ---- sending ----------------------------------------------------------------------------
-
-  /** After a send, look again once the start timeout has passed even if nothing else changes. */
   private markSent(paneId: string) {
     this.phase.set(paneId, { phase: 'sent', at: this.now() });
     const t = setTimeout(() => {
@@ -214,10 +189,6 @@ export class PromptQueues {
     if (this.lastState) this.drive(this.lastState.live, this.lastState.agents);
   }
 
-  /**
-   * Called on every live-state change. Advances each pane's phase from the agent status and
-   * sends the next prompt when its agent is free.
-   */
   drive(live: string, agents: AgentMap): void {
     this.lastState = { live, agents };
     const paused = this.queues.size ? [...this.queues.keys()].map((p) => this.pausedReason(p) ?? '').join('|') : '';
@@ -253,7 +224,6 @@ export class PromptQueues {
       this.markSent(paneId);
       await this.remove(paneId, first.id);
     } catch {
-      // Left in the queue; the next state change tries again.
     } finally {
       this.sending.delete(paneId);
     }

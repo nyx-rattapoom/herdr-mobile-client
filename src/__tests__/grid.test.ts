@@ -42,19 +42,19 @@ describe('grid layout', () => {
       [1, 2, [{ x: 0, y: 0, w: 2, h: 0.5 }]],
       [3, 1, [{ x: 0, y: 0, w: 1, h: 1 }]],
     ]);
-    expect(blockRects(0x2584)).toEqual([{ x: 0, y: 0.5, w: 1, h: 0.5 }]); // ▄
-    expect(blockRects(0x258c)).toEqual([{ x: 0, y: 0, w: 0.5, h: 1 }]); // ▌
-    expect(blockRects(0x2592)).toEqual([{ x: 0, y: 0, w: 1, h: 1, opacity: 0.5 }]); // ▒
-    expect(blockRects(0x259a)).toHaveLength(2); // ▚
+    expect(blockRects(0x2584)).toEqual([{ x: 0, y: 0.5, w: 1, h: 0.5 }]);
+    expect(blockRects(0x258c)).toEqual([{ x: 0, y: 0, w: 0.5, h: 1 }]);
+    expect(blockRects(0x2592)).toEqual([{ x: 0, y: 0, w: 1, h: 1, opacity: 0.5 }]);
+    expect(blockRects(0x259a)).toHaveLength(2);
     expect(blockRects(0x41)).toBeNull();
   });
 
   it('draws light/heavy box lines and rounded corners, leaving doubles to the font', () => {
-    expect(boxArms(0x2503)).toEqual([2, 0, 2, 0]); // ┃
-    expect(boxArms(0x2579)).toEqual([2, 0, 0, 0]); // ╹
-    expect(boxArms(0x250d)).toEqual([0, 2, 1, 0]); // ┍ down light, right heavy
-    expect(boxArms(0x253c)).toEqual([1, 1, 1, 1]); // ┼
-    expect(boxArms(0x2550)).toBeNull(); // ═
+    expect(boxArms(0x2503)).toEqual([2, 0, 2, 0]);
+    expect(boxArms(0x2579)).toEqual([2, 0, 0, 0]);
+    expect(boxArms(0x250d)).toEqual([0, 2, 1, 0]);
+    expect(boxArms(0x253c)).toEqual([1, 1, 1, 1]);
+    expect(boxArms(0x2550)).toBeNull();
     const g = one('╭──╮');
     expect(g.items.map((i) => [i.kind, i.col, i.cells])).toEqual([
       ['arc', 0, 1],

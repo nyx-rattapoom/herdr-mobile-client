@@ -55,7 +55,6 @@ describe('session snapshot', () => {
     expect(api.tabs.map((t) => t.tab_id)).toEqual(['w2:t1', 'w2:t2']);
     expect(api.tabs[0].panes[0]).toMatchObject({ pane_id: 'w2:p1', agent: 'claude', agent_status: 'blocked' });
     expect(api.tabs[1].panes[0].terminal_title_stripped).toBe('tail -f');
-    // Tab w9:t1 has no workspace and is dropped.
     expect(tree.flatMap((w) => w.tabs).some((t) => t.tab_id === 'w9:t1')).toBe(false);
   });
 });

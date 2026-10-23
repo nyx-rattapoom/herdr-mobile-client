@@ -4,7 +4,6 @@ import { paneStatus, tabName, workspaceName } from './workspace';
 
 export type AgentGroup = 'pinned' | 'blocked' | 'working' | 'done' | 'idle';
 
-/** Group order and headings in the agents sheet. */
 export const AGENT_GROUPS: { id: AgentGroup; title: string }[] = [
   { id: 'pinned', title: 'Pinned' },
   { id: 'blocked', title: 'Needs you' },
@@ -22,13 +21,11 @@ export type AgentRow = {
   tab: string;
   workspace: string;
   workspaceId: string;
-  /** Done since the user last opened the pane. */
   unseen: boolean;
   pinned?: boolean;
   muted?: boolean;
 };
 
-/** Local pin/mute/snooze marks, as far as the list needs them. */
 export type RowFlags = {
   get(paneId: string): { pinned?: boolean; muted?: boolean };
   isSnoozed(paneId: string): boolean;
@@ -36,14 +33,9 @@ export type RowFlags = {
 
 const groupOf = (s: string): AgentGroup => (s === 'blocked' || s === 'working' || s === 'done' ? s : 'idle');
 
-/**
- * A done agent is unseen when its status changed after the pane was last opened. `since` is 0
- * for statuses already present at connect, so those count as unseen only for never-opened panes.
- */
 export const isUnseen = (status: string, since: number | undefined, viewedAt: number | undefined) =>
   status === 'done' && (viewedAt ?? -1) < (since ?? 0);
 
-/** Every agent pane in the session, grouped and ordered for the agents sheet. Snoozed panes are left out. */
 export function agentRows(
   tree: WorkspaceNode[],
   agents: AgentMap,
@@ -77,6 +69,5 @@ export function agentRows(
     }
   }
   const order = (r: AgentRow) => AGENT_GROUPS.findIndex((g) => g.id === r.group);
-  // Stable sort keeps tree order within a group; unseen done agents come first.
   return rows.sort((a, b) => order(a) - order(b) || Number(b.unseen) - Number(a.unseen));
 }

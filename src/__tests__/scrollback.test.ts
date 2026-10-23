@@ -15,13 +15,11 @@ import {
 } from '../live/scrollback';
 
 const dir = join(__dirname, 'fixtures', 'claude-fullscreen');
-/** A pane.read of the screen, as PaneView parses it. */
 const read = (text: string) => {
   const p = parseAnsi(text);
   if (p.length > 1 && p[p.length - 1].length === 0) p.pop();
   return p;
 };
-/** Screens polled once a second from real Claude Code (`"tui": "fullscreen"`) through Herdr. */
 const frames = (name: string) =>
   readdirSync(join(dir, name))
     .sort()
@@ -31,7 +29,6 @@ const replay = (screens: Line[][], from: Kept = EMPTY_KEPT, hold = false) =>
 const texts = (rows: Line[]) => rows.map((r) => lineText(r).trimEnd());
 const screen = (rows: string[]) => rows.map((t): Line => (t ? [{ text: t, style: {} }] : []));
 
-/** A transcript above a pinned prompt box and status line, scrolled to show rows `from`…. */
 const FOOTER = ['', '────', '❯', '────', '  status'];
 const view = (from: number, height = 10, footer = FOOTER) =>
   screen([...Array.from({ length: height }, (_, i) => `line ${from + i}`), ...footer]);
@@ -43,7 +40,6 @@ describe('keepScrolledOff on Claude Code', () => {
     const history = readFileSync(join(dir, 'working-history.txt'), 'utf8').split('\n').map((l) => l.trimEnd());
     const kept = texts(k.rows);
     const gap = kept.indexOf(lineText(GAP_ROW));
-    // A 30-line list came out between two reads; the gap is marked where it was, just above the screen.
     expect(gap).toBe(kept.length - 1);
     const before = kept.slice(0, gap);
     const at = history.indexOf(before[0]);
@@ -106,7 +102,6 @@ describe('keepScrolledOff', () => {
       'line 1',
       'line 2',
       ...Array.from({ length: 10 }, (_, i) => `line ${3 + i}`),
-      // The blank row above the footer is part of the transcript area.
       '',
       lineText(GAP_ROW),
     ]);
@@ -115,19 +110,16 @@ describe('keepScrolledOff', () => {
   it("doesn't keep a far-back screen again when the agent returns from it", () => {
     const k = replay([view(1), view(3), view(13), view(23)]);
     const before = texts(k.rows);
-    // Scrolled back to the start in one go, then down to the latest again.
     expect(texts(replay([view(1), view(23)], k).rows)).toEqual(before);
   });
 
   it('takes back a screen kept at a gap when an overlay over it closes', () => {
-    // A transcript view or picker covers the transcript, then closes; output then resumes.
     const overlay = screen([...Array.from({ length: 10 }, (_, i) => `pick ${i}`), ...FOOTER]);
     const k = replay([view(1), view(3), overlay, view(3), view(6)]);
     expect(texts(k.rows)).toEqual(['line 1', 'line 2', 'line 3', 'line 4', 'line 5']);
   });
 
   it("doesn't show rows twice while they are scrolled back onto the screen", () => {
-    // A dialog pushed rows off; it closes and they come back down.
     const k = replay([view(1), view(4), view(2)]);
     expect(texts(shownRows(k))).toEqual(['line 1']);
     expect(texts(shownRows(keepScrolledOff(k, view(7))))).toEqual(['line 1', 'line 2', 'line 3', 'line 4', 'line 5', 'line 6']);
@@ -151,7 +143,6 @@ describe('keepScrolledOff', () => {
   });
 
   it("doesn't take a prompt moving into the transcript for a scroll", () => {
-    // The prompt leaves the input box for the transcript; the banner and status stay put.
     const before = screen(['', 'banner', '', '', '', '', '', '────', '❯ hello', '────', 'status', 'mode']);
     const after = screen(['', 'banner', '', '❯ hello', '', '', '', '────', '❯', '────', 'status', 'mode']);
     expect(replay([before, after]).rows).toEqual([]);
@@ -168,7 +159,6 @@ describe('keepScrolledOff', () => {
     let from = 1;
     while (k.rows.length <= MAX_KEPT_ROWS) k = keepScrolledOff(k, view((from += 8)), true);
     expect(k.dropped).toBe(0);
-    // Back at the end: the next rows that scroll off drop the oldest.
     const back = keepScrolledOff(k, view(from + 8));
     expect(back.rows.length).toBe(k.rows.length + 8 - back.dropped);
     expect(back.dropped).toBeGreaterThan(0);
@@ -195,7 +185,6 @@ describe('keepScrolledOff', () => {
 describe('shiftUp', () => {
   it('needs one unambiguous shift', () => {
     expect(shiftUp(['a', 'b', 'c', 'd'], ['c', 'd', 'e', 'f'])).toBe(2);
-    // Only repeated rows: 1 or 3 rows would fit equally.
     expect(shiftUp(['x', 'y', 'x', 'y'], ['x', 'y', 'z', 'w'])).toBeNull();
   });
 });

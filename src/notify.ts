@@ -3,7 +3,6 @@ import { Platform } from 'react-native';
 
 import HerdrSsh from '../modules/herdr-ssh';
 
-// Channel settings are immutable once created, so the private-on-lock-screen channel has a new id.
 export const AGENT_CHANNEL = 'agent-alerts';
 const OLD_CHANNELS = ['agents'];
 
@@ -18,14 +17,12 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/** Creates the channel (needed before Android 13 shows the permission prompt) and asks once. */
 export async function setupNotifications(): Promise<boolean> {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(AGENT_CHANNEL, {
       name: 'Agent status',
       description: 'An agent is blocked waiting for you, or finished its work',
       importance: Notifications.AndroidImportance.HIGH,
-      // On a secure lock screen show only "Herdr Client", not server/agent names.
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     });
     for (const id of OLD_CHANNELS) await Notifications.deleteNotificationChannelAsync(id).catch(() => {});
@@ -39,7 +36,6 @@ export async function setupNotifications(): Promise<boolean> {
 export function postAgentNotification(title: string, body: string, target: AlertTarget) {
   return Notifications.scheduleNotificationAsync({
     content: { title, body, data: target },
-    // Immediate delivery; on Android the channel is chosen through the trigger.
     trigger: Platform.OS === 'android' ? { channelId: AGENT_CHANNEL } : null,
   });
 }
@@ -51,7 +47,6 @@ function isTarget(d: unknown): d is AlertTarget {
 
 const handled = new Set<string>();
 
-/** Calls `onOpen` once per tapped agent notification (also for a cold start). */
 export function onNotificationTap(onOpen: (t: AlertTarget) => void): () => void {
   const handle = (r: Notifications.NotificationResponse | null) => {
     if (!r) return;
