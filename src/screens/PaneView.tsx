@@ -160,7 +160,9 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
   /** The list is still moving after a fling. */
   const flinging = useRef(false);
   const following = useRef(follow);
-  following.current = follow;
+  useEffect(() => {
+    following.current = follow;
+  }, [follow]);
   const dropped = useRef(kept.dropped);
   useEffect(() => {
     // Kept rows dropped at their cap move everything up; a reader keeps their place.
