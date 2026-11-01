@@ -1,4 +1,4 @@
-import { PinStore, decidePin, endpointId, hostKeyFileHint } from '../ssh/pinning';
+import { PinStore, decidePin, endpointId, hostKeyFileHint, pinHost } from '../ssh/pinning';
 import { MemoryKv } from '../testing/fakes';
 
 const keyA = { algorithm: 'ssh-ed25519', key: 'AAAAC3NzaC1lZDI1NTE5AAAAIA==', fingerprint: 'SHA256:aaaa' };
@@ -97,5 +97,16 @@ describe('forgotten pins and hints (review L9)', () => {
     expect(hostKeyFileHint('rsa-sha2-512')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub');
     expect(hostKeyFileHint('ssh-rsa')).toBe('ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub');
     expect(hostKeyFileHint('weird')).toContain('ssh_host_*_key.pub');
+  });
+});
+
+describe('pinHost', () => {
+  it('scopes a hopped server pin to its jump host', async () => {
+    const store = new PinStore(new MemoryKv());
+    expect(pinHost({ host: 'box' })).toBe('box');
+    await store.pin(pinHost({ host: '192.168.1.20', jumpId: 'a' }), 22, keyA);
+    expect(await store.get(pinHost({ host: '192.168.1.20', jumpId: 'a' }), 22)).not.toBeNull();
+    expect(await store.get(pinHost({ host: '192.168.1.20', jumpId: 'b' }), 22)).toBeNull();
+    expect(await store.get('192.168.1.20', 22)).toBeNull();
   });
 });

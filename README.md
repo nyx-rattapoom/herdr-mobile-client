@@ -11,6 +11,8 @@ M1–M5 from [docs/SPEC.md](docs/SPEC.md) are implemented on Android. Per-milest
 
 - SSH straight to Herdr's socket (direct-streamlocal). Nothing is uploaded to the server. The host key is shown and
   pinned before any credential is sent, and a mismatch blocks the connection.
+- Jump hosts (like `ssh -J`): a server can hop through another saved server, e.g. a Tailscale machine that reaches a
+  box on its LAN. Each hop's host key is pinned separately, and the jump host only relays the encrypted inner session.
 - Ed25519 device key (generated on the phone), with password as fallback. Optional biometric unlock for saved
   credentials.
 - Live sessions → workspaces → tabs → panes. Pane output with scrollback. Text, keys and agent prompts. Focus,

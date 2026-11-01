@@ -34,9 +34,9 @@ import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
 import { Busy, MODAL_SWAP_MS, colors } from './src/screens/ui';
 import type { DiscoveryResult } from './src/protocol/sessions';
-import { ServerConnection, describeSshError, isRetryableSshError, probeHostKey } from './src/ssh/connection';
-import { decidePin, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
-import { endpointInUse, type ServerProfile } from './src/store/servers';
+import { ServerConnection, describeSshError, isRetryableSshError, probeHostKey, type JumpHost } from './src/ssh/connection';
+import { decidePin, pinHost, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
+import { dependentsOf, endpointInUse, jumpCandidates, type ServerProfile } from './src/store/servers';
 import { AuditLog, type AuditEntry } from './src/store/audit';
 import { PaneFlags, formatUntil, nextClockTime, snoozePresets } from './src/store/paneFlags';
 import { ViewedStore } from './src/store/viewed';
@@ -307,6 +307,19 @@ export default function App() {
     [showSessions, startSessions],
   );
 
+  const jumpFor = useCallback(
+    async (server: ServerProfile): Promise<JumpHost | undefined> => {
+      if (!server.jumpId) return undefined;
+      const jump = (await servers.list()).find((s) => s.id === server.jumpId);
+      if (!jump) throw new Error(`The jump server for ${server.label} was removed. Edit ${server.label} to pick another.`);
+      if (jump.jumpId) throw new Error(`${jump.label} hops through another server; only one hop is supported.`);
+      const pin = await pins.get(pinHost(jump), jump.port);
+      if (!pin) throw new Error(`Connect to ${jump.label} directly once to verify its host key, then try again.`);
+      return { label: jump.label, params: { ...jump, ...(await credentialsFor(jump)) }, pin };
+    },
+    [servers, pins, credentialsFor],
+  );
+
   const superviseConnection = useCallback(
     (server: ServerProfile) => {
       reconnector.current?.stop();
@@ -314,9 +327,9 @@ export default function App() {
       const r: Reconnector = new Reconnector({
         current: () => conn.current,
         reopen: async () => {
-          const pin = await pins.get(server.host, server.port);
+          const pin = await pins.get(pinHost(server), server.port);
           if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
-          return ServerConnection.open({ ...server, ...(await credentialsFor(server)) }, pin);
+          return ServerConnection.open({ ...server, ...(await credentialsFor(server)) }, pin, await jumpFor(server));
         },
         install: (next) => {
           conn.current = next as ServerConnection;
@@ -328,7 +341,7 @@ export default function App() {
       });
       reconnector.current = r;
     },
-    [pins, credentialsFor],
+    [pins, credentialsFor, jumpFor],
   );
 
   const step = useCallback(async <T,>(id: number, n: number, fn: () => Promise<T>, note?: (r: T) => string | undefined): Promise<T> => {
@@ -342,7 +355,10 @@ export default function App() {
       if (e instanceof Cancelled || id !== attempt.current) throw new Cancelled();
       throw new ConnectStepError(n, e, describeSshError(e));
     }
-    if (id !== attempt.current) throw new Cancelled();
+    if (id !== attempt.current) {
+      if (result instanceof ServerConnection) result.close();
+      throw new Cancelled();
+    }
     const text = note?.(result);
     if (text) progress.current = { ...progress.current, notes: { ...progress.current.notes, [n]: text } };
     return result;
@@ -352,7 +368,7 @@ export default function App() {
     async (server: ServerProfile, pin: HostKeyPin, id: number) => {
       const c = await step(id, 2, async () => {
         const creds = await credentialsFor(server);
-        return ServerConnection.open({ ...server, ...creds }, pin);
+        return ServerConnection.open({ ...server, ...creds }, pin, await jumpFor(server));
       });
       if (id !== attempt.current) {
         c.close();
@@ -377,7 +393,7 @@ export default function App() {
       }
       showSessions(route);
     },
-    [credentialsFor, startSessions, showSessions, step, superviseConnection],
+    [credentialsFor, jumpFor, startSessions, showSessions, step, superviseConnection],
   );
 
   const runSetup = useCallback(
@@ -478,22 +494,24 @@ export default function App() {
     async (server: ServerProfile) => {
       setError(null);
       const id = ++attempt.current;
-      progress.current = { step: 0, target: `${server.username}@${server.host}:${server.port}`, startedAt: Date.now(), notes: {} };
+      const via = list.find((x) => x.id === server.jumpId);
+      const target = `${server.username}@${server.host}:${server.port}${via ? ` via ${via.label}` : ''}`;
+      progress.current = { step: 0, target, startedAt: Date.now(), notes: {} };
       try {
-        const presented = await step(id, 0, () => probeHostKey(server.host, server.port), (k) => k.algorithm);
+        const presented = await step(id, 0, async () => probeHostKey(server.host, server.port, await jumpFor(server)), (k) => k.algorithm);
         const decision = await step(
           id,
           1,
-          async () => decidePin(await pins.get(server.host, server.port), presented),
+          async () => decidePin(await pins.get(pinHost(server), server.port), presented),
           (d) => (d.kind === 'match' ? 'pinned' : d.kind === 'unpinned' ? 'new key' : 'changed!'),
         );
         if (decision.kind === 'match') return await connectPinned(server, decision.pin, id);
-        setRoute({ name: 'hostkey', server, decision, previous: await pins.previous(server.host, server.port) });
+        setRoute({ name: 'hostkey', server, decision, previous: await pins.previous(pinHost(server), server.port) });
       } catch (e) {
         fail(e);
       }
     },
-    [pins, connectPinned, fail, step],
+    [list, pins, jumpFor, connectPinned, fail, step],
   );
 
   useEffect(
@@ -513,7 +531,7 @@ export default function App() {
     async (server: ServerProfile, decision: PinDecision) => {
       if (decision.kind !== 'unpinned') return;
       try {
-        const pin = await pins.pin(server.host, server.port, decision.presented);
+        const pin = await pins.pin(pinHost(server), server.port, decision.presented);
         await connectPinned(server, pin, attempt.current);
       } catch (e) {
         fail(e);
@@ -528,11 +546,19 @@ export default function App() {
       if (id === 'edit') {
         setRoute({ name: 'edit', server, hasPassword: await hasPassword(server.id) });
       } else if (id === 'forget') {
-        Alert.alert('Forget host key', `The next connection to ${server.host}:${server.port} will ask you to verify its fingerprint again.`, [
+        Alert.alert('Forget host key', `The next connection to ${server.host}:${server.port}${server.jumpId ? ' via its jump server' : ''} will ask you to verify its fingerprint again.`, [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Forget', style: 'destructive', onPress: () => void pins.forget(server.host, server.port) },
+          { text: 'Forget', style: 'destructive', onPress: () => void pins.forget(pinHost(server), server.port) },
         ]);
       } else if (id === 'remove') {
+        const using = dependentsOf(await servers.list(), server.id);
+        if (using.length) {
+          Alert.alert(
+            'Server in use',
+            `${using.map((s) => s.label).join(', ')} hop${using.length === 1 ? 's' : ''} through ${server.label}. Change or remove ${using.length === 1 ? 'it' : 'them'} first.`,
+          );
+          return;
+        }
         Alert.alert('Remove server', `Remove ${server.label} and its saved password and host key?`, [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -540,7 +566,7 @@ export default function App() {
             style: 'destructive',
             onPress: async () => {
               await servers.remove(server.id);
-              if (!endpointInUse(await servers.list(), server.host, server.port)) await pins.purge(server.host, server.port);
+              if (!endpointInUse(await servers.list(), server)) await pins.purge(pinHost(server), server.port);
               reload();
             },
           },
@@ -611,6 +637,7 @@ export default function App() {
       screen = (
         <ServersScreen
           servers={list}
+          jumpLabel={(s) => list.find((x) => x.id === s.jumpId)?.label}
           error={error}
           onAdd={() => setRoute({ name: 'add' })}
           onOpen={open}
@@ -630,6 +657,7 @@ export default function App() {
           initial={route.name === 'edit' ? route.server : undefined}
           hasSavedPassword={route.name === 'edit' && route.hasPassword}
           devicePublicKey={account.publicKey}
+          jumpOptions={jumpCandidates(list, route.name === 'edit' ? route.server.id : undefined)}
           onShowKey={() => setRoute({ name: 'settings' })}
           onCancel={home}
           onSave={async (input, opts) => {
@@ -698,6 +726,7 @@ export default function App() {
           server={route.server}
           decision={route.decision}
           previous={route.previous}
+          via={list.find((x) => x.id === route.server.jumpId)?.label}
           onCancel={home}
           onTrust={() => trust(route.server, route.decision)}
         />

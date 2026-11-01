@@ -5,6 +5,7 @@ import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
   servers: ServerProfile[];
+  jumpLabel: (s: ServerProfile) => string | undefined;
   error: string | null;
   onAdd: () => void;
   onOpen: (s: ServerProfile) => void;
@@ -12,7 +13,7 @@ type Props = {
   onSettings: () => void;
 };
 
-export function ServersScreen({ servers, error, onAdd, onOpen, onManage, onSettings }: Props) {
+export function ServersScreen({ servers, jumpLabel, error, onAdd, onOpen, onManage, onSettings }: Props) {
   return (
     <View style={styles.screen}>
       <Header
@@ -39,7 +40,8 @@ export function ServersScreen({ servers, error, onAdd, onOpen, onManage, onSetti
             >
               <Text style={styles.text}>{item.label}</Text>
               <Text style={styles.muted}>
-                {item.username}@{item.host}:{item.port} · {authOf(item) === 'key' ? 'device key' : 'password'}
+                {item.username}@{item.host}:{item.port}
+                {item.jumpId ? ` via ${jumpLabel(item) ?? 'missing server'}` : ''} · {authOf(item) === 'key' ? 'device key' : 'password'}
               </Text>
             </Pressable>
           )}

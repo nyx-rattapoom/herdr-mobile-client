@@ -74,3 +74,20 @@ SSHD, or libssh2 (JNI) in depth, so they remain options if JSch hits a blocker.
 
 Not needed. Per SPEC.md it would be a small, reproducibly built, open-source helper written against the
 public API, used only when stream-local forwarding is disabled.
+
+## 5. Jump hosts
+
+A server profile may name another saved server as its jump host (one hop only). The app opens the jump
+session first (its pin must already exist and is enforced before its credentials are sent), then runs the
+target's SSH session through a `direct-tcpip` channel on it (`JumpProxy`, a JSch `Proxy`). The target does
+its own key exchange end to end, so probe → confirm → pin works exactly as for a direct server, and the
+target's credentials are only sent after its pin matches. Target pins are keyed by `<jumpId>>host:port`, so
+the same LAN address behind two different jump hosts are different endpoints.
+
+The jump host's sshd must allow TCP forwarding (`AllowTcpForwarding`, default `yes`). Open failure reason
+1 maps to `ERR_JUMP_PROHIBITED`, and reason 2 (the jump host can't reach the target) to `ERR_JUMP_UNREACHABLE`.
+
+Proxied sessions have no socket, so JSch can't apply its read timeout to them. Two consequences:
+`JumpProxy.connect` arms a watchdog that disconnects a handshake that hasn't finished within the connect
+timeout (a target that accepts TCP and then stays silent), and native `ServerAliveInterval` doesn't detect a
+target that dies silently while the jump host stays up. The app-level liveness check (`alive()`) covers that.

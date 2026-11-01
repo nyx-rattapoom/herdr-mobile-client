@@ -8,12 +8,13 @@ type Props = {
   server: ServerProfile;
   decision: Extract<PinDecision, { kind: 'unpinned' | 'mismatch' }>;
   previous?: ForgottenPin | null;
+  via?: string;
   onTrust: () => void;
   onCancel: () => void;
 };
 
-export function HostKeyScreen({ server, decision, previous, onTrust, onCancel }: Props) {
-  const endpoint = `${server.host}:${server.port}`;
+export function HostKeyScreen({ server, decision, previous, via, onTrust, onCancel }: Props) {
+  const endpoint = `${server.host}:${server.port}${via ? ` (via ${via})` : ''}`;
   if (decision.kind === 'mismatch') {
     return (
       <View style={styles.screen} testID="hostkey-mismatch">

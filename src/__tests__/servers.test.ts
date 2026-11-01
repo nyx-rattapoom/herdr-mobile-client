@@ -1,4 +1,4 @@
-import { ServerStore, endpointInUse, validateServer } from '../store/servers';
+import { ServerStore, dependentsOf, endpointInUse, jumpCandidates, validateJump, validateServer } from '../store/servers';
 import { MemoryKv } from '../testing/fakes';
 
 const base = { host: '10.0.2.2', port: 2222, username: 'herdr', password: 'pw' };
@@ -55,8 +55,55 @@ describe('ServerStore', () => {
 describe('endpointInUse', () => {
   it('matches host case-insensitively per port', () => {
     const list = [{ host: 'Box.example', port: 22 }];
-    expect(endpointInUse(list, 'box.example', 22)).toBe(true);
-    expect(endpointInUse(list, 'box.example', 2222)).toBe(false);
-    expect(endpointInUse([], 'box.example', 22)).toBe(false);
+    expect(endpointInUse(list, { host: 'box.example', port: 22 })).toBe(true);
+    expect(endpointInUse(list, { host: 'box.example', port: 2222 })).toBe(false);
+    expect(endpointInUse([], { host: 'box.example', port: 22 })).toBe(false);
+  });
+
+  it('treats the same LAN address behind different jump hosts as different endpoints', () => {
+    const list = [{ host: '192.168.1.20', port: 22, jumpId: 'a' }];
+    expect(endpointInUse(list, { host: '192.168.1.20', port: 22, jumpId: 'a' })).toBe(true);
+    expect(endpointInUse(list, { host: '192.168.1.20', port: 22, jumpId: 'b' })).toBe(false);
+    expect(endpointInUse(list, { host: '192.168.1.20', port: 22 })).toBe(false);
+  });
+});
+
+describe('jump hosts', () => {
+  const ids = (...xs: string[]) => {
+    let i = 0;
+    return () => xs[i++];
+  };
+
+  it('stores a hop and lists only direct servers as candidates', async () => {
+    const store = new ServerStore(new MemoryKv(), ids('a', 'b', 'c'));
+    const a = await store.add({ ...base, host: '100.64.0.1', label: 'A' });
+    const b = await store.add({ ...base, host: '192.168.1.20', label: 'B', jumpId: a.id });
+    expect(b.jumpId).toBe('a');
+    const list = await store.list();
+    expect(jumpCandidates(list).map((s) => s.id)).toEqual(['a']);
+    expect(jumpCandidates(list, 'a')).toEqual([]);
+    expect(jumpCandidates(list, 'b').map((s) => s.id)).toEqual(['a']);
+    expect(dependentsOf(list, 'a').map((s) => s.id)).toEqual(['b']);
+  });
+
+  it('allows exactly one hop', async () => {
+    const store = new ServerStore(new MemoryKv(), ids('a', 'b', 'c'));
+    const a = await store.add({ ...base, label: 'A' });
+    const b = await store.add({ ...base, label: 'B', jumpId: a.id });
+    await expect(store.add({ ...base, label: 'C', jumpId: b.id })).rejects.toThrow(/one hop/);
+    await expect(store.update(a.id, { ...base, jumpId: b.id })).rejects.toThrow();
+    await expect(store.update(b.id, { ...base, jumpId: b.id })).rejects.toThrow(/itself/);
+    await expect(store.add({ ...base, jumpId: 'missing' })).rejects.toThrow(/no longer exists/);
+    expect(validateJump(await store.list(), undefined, undefined)).toBeNull();
+  });
+
+  it('refuses to remove a server others hop through', async () => {
+    const store = new ServerStore(new MemoryKv(), ids('a', 'b'));
+    const a = await store.add({ ...base, label: 'A' });
+    const b = await store.add({ ...base, label: 'B', jumpId: a.id });
+    await expect(store.remove(a.id)).rejects.toThrow(/B hops through/);
+    await store.update(b.id, { ...base, label: 'B' });
+    expect((await store.list()).find((s) => s.id === 'b')?.jumpId).toBeUndefined();
+    await store.remove(a.id);
   });
 });

@@ -9,12 +9,13 @@ type Props = {
   initial?: ServerProfile;
   hasSavedPassword?: boolean;
   devicePublicKey: string | null;
+  jumpOptions: ServerProfile[];
   onCancel: () => void;
   onSave: (input: ServerInput, opts: { clearPassword: boolean }) => Promise<void>;
   onShowKey: () => void;
 };
 
-export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, onCancel, onSave, onShowKey }: Props) {
+export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, jumpOptions, onCancel, onSave, onShowKey }: Props) {
   const editing = Boolean(initial);
   const [label, setLabel] = useState(initial?.label ?? '');
   const [host, setHost] = useState(initial?.host ?? '');
@@ -24,11 +25,12 @@ export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, o
   const [password, setPassword] = useState('');
   const [clearPassword, setClearPassword] = useState(false);
   const [herdrPath, setHerdrPath] = useState(initial?.herdrPath ?? '');
+  const [jumpId, setJumpId] = useState<string | undefined>(initial?.jumpId);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    const input: ServerInput = { label, host, port: Number(port), username, auth, password, herdrPath };
+    const input: ServerInput = { label, host, port: Number(port), username, auth, password, herdrPath, jumpId };
     const err = validateServer(input, { hasSavedPassword: hasSavedPassword && !clearPassword });
     if (err) return setError(err);
     setSaving(true);
@@ -69,7 +71,32 @@ export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, o
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {error ? <ErrorBox message={error} /> : null}
         {field('name', 'Name (optional)', label, setLabel, { placeholder: 'dev box' })}
-        {field('host', 'Host', host, setHost, { placeholder: 'example.com', keyboardType: 'url' })}
+        {jumpOptions.length > 0 || jumpId ? (
+          <View>
+            <Text style={styles.label}>Connect via</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {[{ id: undefined, label: 'Direct' }, ...jumpOptions].map((o) => {
+                const on = jumpId === o.id;
+                return (
+                  <Pressable
+                    key={o.id ?? 'direct'}
+                    testID={`jump-${o.id ?? 'direct'}`}
+                    onPress={() => setJumpId(o.id)}
+                    style={[styles.card, { paddingVertical: 8, paddingHorizontal: 12, borderColor: on ? colors.accent : colors.border }]}
+                  >
+                    <Text style={[styles.text, { color: on ? colors.accent : colors.text }]}>{o.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {jumpId ? (
+              <Text style={styles.muted}>
+                Hops through that server (like ssh -J). Use the host as the jump server sees it, e.g. a LAN IP.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+        {field('host', 'Host', host, setHost, { placeholder: jumpId ? '192.168.1.20' : 'example.com', keyboardType: 'url' })}
         {field('port', 'Port', port, setPort, { keyboardType: 'number-pad' })}
         {field('user', 'User', username, setUsername)}
 
