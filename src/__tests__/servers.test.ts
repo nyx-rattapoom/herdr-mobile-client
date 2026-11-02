@@ -1,4 +1,15 @@
-import { ServerStore, dependentsOf, endpointInUse, jumpCandidates, validateJump, validateServer } from '../store/servers';
+import {
+  MAX_HOPS,
+  ServerStore,
+  dependentsOf,
+  endpointInUse,
+  jumpCandidates,
+  jumpChain,
+  jumpOptions,
+  routeLabel,
+  validateJump,
+  validateServer,
+} from '../store/servers';
 import { MemoryKv } from '../testing/fakes';
 
 const base = { host: '10.0.2.2', port: 2222, username: 'herdr', password: 'pw' };
@@ -74,27 +85,98 @@ describe('jump hosts', () => {
     return () => xs[i++];
   };
 
-  it('stores a hop and lists only direct servers as candidates', async () => {
+  it('stores a hop and offers every server that does not route through the edited one', async () => {
     const store = new ServerStore(new MemoryKv(), ids('a', 'b', 'c'));
     const a = await store.add({ ...base, host: '100.64.0.1', label: 'A' });
     const b = await store.add({ ...base, host: '192.168.1.20', label: 'B', jumpId: a.id });
     expect(b.jumpId).toBe('a');
     const list = await store.list();
-    expect(jumpCandidates(list).map((s) => s.id)).toEqual(['a']);
+    expect(jumpCandidates(list).map((s) => s.id)).toEqual(['a', 'b']);
     expect(jumpCandidates(list, 'a')).toEqual([]);
     expect(jumpCandidates(list, 'b').map((s) => s.id)).toEqual(['a']);
     expect(dependentsOf(list, 'a').map((s) => s.id)).toEqual(['b']);
   });
 
-  it('allows exactly one hop', async () => {
+  it('chains hops in travel order', async () => {
+    const store = new ServerStore(new MemoryKv(), ids('a', 'b', 'c', 'd'));
+    const a = await store.add({ ...base, host: '192.168.1.100', label: 'internal' });
+    const b = await store.add({ ...base, host: '10.0.0.2', label: 'pi', auth: 'key', password: '', jumpId: a.id });
+    const c = await store.add({ ...base, host: '192.168.88.111', label: 'target', jumpId: b.id });
+    const list = await store.list();
+    expect(jumpChain(list, c).map((s) => s.id)).toEqual(['a', 'b']);
+    expect(jumpChain(list, a)).toEqual([]);
+    expect(routeLabel(list, c)).toBe('internal → pi');
+    expect(routeLabel(list, a)).toBeUndefined();
+    expect(jumpOptions(list, 'd')).toEqual([
+      { id: 'a', label: 'internal', route: ['internal'] },
+      { id: 'b', label: 'pi', route: ['internal', 'pi'] },
+      { id: 'c', label: 'target', route: ['internal', 'pi', 'target'] },
+    ]);
+  });
+
+  it('rejects loops, self hops and missing servers', async () => {
     const store = new ServerStore(new MemoryKv(), ids('a', 'b', 'c'));
     const a = await store.add({ ...base, label: 'A' });
     const b = await store.add({ ...base, label: 'B', jumpId: a.id });
-    await expect(store.add({ ...base, label: 'C', jumpId: b.id })).rejects.toThrow(/one hop/);
-    await expect(store.update(a.id, { ...base, jumpId: b.id })).rejects.toThrow();
+    const c = await store.add({ ...base, label: 'C', jumpId: b.id });
+    await expect(store.update(a.id, { ...base, jumpId: c.id })).rejects.toThrow(/loop/);
+    await expect(store.update(a.id, { ...base, jumpId: b.id })).rejects.toThrow(/loop/);
     await expect(store.update(b.id, { ...base, jumpId: b.id })).rejects.toThrow(/itself/);
     await expect(store.add({ ...base, jumpId: 'missing' })).rejects.toThrow(/no longer exists/);
     expect(validateJump(await store.list(), undefined, undefined)).toBeNull();
+    expect(jumpCandidates(await store.list(), 'a')).toEqual([]);
+  });
+
+  it('reports a broken route instead of looping forever', () => {
+    const list = [
+      { id: 'a', label: 'A', host: 'h', port: 22, username: 'u', jumpId: 'b' },
+      { id: 'b', label: 'B', host: 'h', port: 22, username: 'u', jumpId: 'a' },
+      { id: 'c', label: 'C', host: 'h', port: 22, username: 'u', jumpId: 'gone' },
+    ];
+    expect(() => jumpChain(list, list[0])).toThrow(/route to A loops back through A/);
+    expect(() => jumpChain(list, list[2])).toThrow(/jump server for C was removed/);
+    expect(jumpCandidates(list)).toEqual([]);
+    expect(routeLabel(list, list[2])).toBe('missing server');
+  });
+
+  it('counts the servers behind the edited one against the hop cap', () => {
+    const list = [
+      { id: 'x', label: 'X', host: 'h', port: 22, username: 'u' },
+      ...Array.from({ length: MAX_HOPS + 1 }, (_, i) => ({
+        id: `s${i}`,
+        label: `S${i}`,
+        host: 'h',
+        port: 22,
+        username: 'u',
+        ...(i > 0 ? { jumpId: `s${i - 1}` } : {}),
+      })),
+    ];
+    expect(validateJump(list, 's0', 'x')).toMatch(/at most/);
+    expect(jumpCandidates(list, 's0')).toEqual([]);
+    expect(validateJump(list, 's1', 'x')).toBeNull();
+  });
+
+  it('explains a broken route on the chosen jump instead of calling it a loop', () => {
+    const list = [
+      { id: 'a', label: 'A', host: 'h', port: 22, username: 'u' },
+      { id: 'b', label: 'B', host: 'h', port: 22, username: 'u', jumpId: 'gone' },
+    ];
+    expect(validateJump(list, 'a', 'b')).toMatch(/jump server for B was removed/);
+  });
+
+  it(`caps a route at ${MAX_HOPS} hops`, () => {
+    const list = Array.from({ length: MAX_HOPS + 1 }, (_, i) => ({
+      id: `s${i}`,
+      label: `S${i}`,
+      host: 'h',
+      port: 22,
+      username: 'u',
+      ...(i > 0 ? { jumpId: `s${i - 1}` } : {}),
+    }));
+    expect(jumpChain(list, list[MAX_HOPS]).length).toBe(MAX_HOPS);
+    expect(jumpCandidates(list).map((s) => s.id)).not.toContain(`s${MAX_HOPS}`);
+    expect(validateJump(list, undefined, `s${MAX_HOPS}`)).toMatch(/at most/);
+    expect(validateJump(list, undefined, `s${MAX_HOPS - 1}`)).toBeNull();
   });
 
   it('refuses to remove a server others hop through', async () => {

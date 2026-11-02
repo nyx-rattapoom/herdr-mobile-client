@@ -77,14 +77,18 @@ public API, used only when stream-local forwarding is disabled.
 
 ## 5. Jump hosts
 
-A server profile may name another saved server as its jump host (one hop only). The app opens the jump
-session first (its pin must already exist and is enforced before its credentials are sent), then runs the
-target's SSH session through a `direct-tcpip` channel on it (`JumpProxy`, a JSch `Proxy`). The target does
+A server profile may name another saved server as its jump host, and that server may name its own, so a
+route is the chain of `jumpId`s (at most 8 hops; loops are rejected when saving and again when connecting).
+The app opens the hops in order, each through a `direct-tcpip` channel on the one before it (`JumpProxy`, a
+JSch `Proxy`). Every hop's pin must already exist and is enforced before that hop's credentials are sent, and
+each hop authenticates with its own password or device key. The connection owns the whole chain and closes
+it from the inside out. The target's SSH session runs the same way through the last hop. The target does
 its own key exchange end to end, so probe → confirm → pin works exactly as for a direct server, and the
-target's credentials are only sent after its pin matches. Target pins are keyed by `<jumpId>>host:port`, so
+target's credentials are only sent after its pin matches. Pins of anything reached through a jump are keyed
+by `<jumpId>>host:port` (the immediate jump only, since that hop's own pin already identifies its route), so
 the same LAN address behind two different jump hosts are different endpoints.
 
-The jump host's sshd must allow TCP forwarding (`AllowTcpForwarding`, default `yes`). Open failure reason
+Every jump host's sshd must allow TCP forwarding (`AllowTcpForwarding`, default `yes`). Open failure reason
 1 maps to `ERR_JUMP_PROHIBITED`, and reason 2 (the jump host can't reach the target) to `ERR_JUMP_UNREACHABLE`.
 
 Proxied sessions have no socket, so JSch can't apply its read timeout to them. Two consequences:

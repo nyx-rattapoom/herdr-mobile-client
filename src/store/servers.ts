@@ -35,18 +35,85 @@ export function endpointInUse(list: PinTarget[], target: PinTarget): boolean {
   return list.some((o) => endpointId(pinHost(o), o.port) === id);
 }
 
-export const jumpCandidates = (list: ServerProfile[], selfId?: string): ServerProfile[] =>
-  list.some((s) => selfId !== undefined && s.jumpId === selfId) ? [] : list.filter((s) => s.id !== selfId && !s.jumpId);
+export const MAX_HOPS = 8;
+
+export function jumpChain(list: ServerProfile[], server: Pick<ServerProfile, 'id' | 'label' | 'jumpId'>): ServerProfile[] {
+  const chain: ServerProfile[] = [];
+  const seen = new Set<string>([server.id]);
+  let next = server.jumpId;
+  let from = server.label;
+  while (next) {
+    const hop = list.find((s) => s.id === next);
+    if (!hop) throw new Error(`The jump server for ${from} was removed. Edit ${from} to pick another.`);
+    if (seen.has(hop.id)) throw new Error(`The route to ${server.label} loops back through ${hop.label}.`);
+    if (chain.length >= MAX_HOPS) throw new Error(`The route to ${server.label} has more than ${MAX_HOPS} hops.`);
+    seen.add(hop.id);
+    chain.unshift(hop);
+    from = hop.label;
+    next = hop.jumpId;
+  }
+  return chain;
+}
+
+const routesThrough = (list: ServerProfile[], start: ServerProfile, id: string): boolean => {
+  try {
+    return start.id === id || jumpChain(list, start).some((h) => h.id === id);
+  } catch {
+    return true;
+  }
+};
+
+const hopsTo = (list: ServerProfile[], s: ServerProfile): number => {
+  try {
+    return jumpChain(list, s).length;
+  } catch {
+    return MAX_HOPS;
+  }
+};
+
+
+export type JumpOption = { id: string; label: string; route: string[] };
+
+export const jumpOptions = (list: ServerProfile[], selfId?: string): JumpOption[] =>
+  jumpCandidates(list, selfId).map((s) => ({ id: s.id, label: s.label, route: [...jumpChain(list, s), s].map((h) => h.label) }));
+
+const depthBelow = (list: ServerProfile[], id: string, seen = new Set<string>()): number => {
+  if (seen.has(id)) return 0;
+  seen.add(id);
+  return list.filter((s) => s.jumpId === id).reduce((max, s) => Math.max(max, 1 + depthBelow(list, s.id, seen)), 0);
+};
+
+export const jumpCandidates = (list: ServerProfile[], selfId?: string): ServerProfile[] => {
+  const below = selfId ? depthBelow(list, selfId) : 0;
+  return list.filter((s) => hopsTo(list, s) + 1 + below <= MAX_HOPS && (selfId === undefined || !routesThrough(list, s, selfId)));
+};
 
 export function validateJump(list: ServerProfile[], selfId: string | undefined, jumpId: string | undefined): string | null {
   if (!jumpId) return null;
   if (jumpId === selfId) return 'A server cannot hop through itself';
   const jump = list.find((s) => s.id === jumpId);
   if (!jump) return 'The jump server no longer exists';
-  if (jump.jumpId) return `${jump.label} already hops through another server; only one hop is supported`;
-  if (selfId && list.some((s) => s.jumpId === selfId)) return 'Other servers hop through this one, so it must connect directly';
+  let hops: number;
+  try {
+    hops = jumpChain(list, jump).length + 1;
+  } catch (e) {
+    return (e as Error).message;
+  }
+  if (selfId && routesThrough(list, jump, selfId)) return `${jump.label} already hops through this server, so that would loop`;
+  if (hops + (selfId ? depthBelow(list, selfId) : 0) > MAX_HOPS) return `A route can have at most ${MAX_HOPS} hops`;
   return null;
 }
+
+export const routeLabel = (list: ServerProfile[], server: ServerProfile): string | undefined => {
+  if (!server.jumpId) return undefined;
+  try {
+    return jumpChain(list, server)
+      .map((h) => h.label)
+      .join(' → ');
+  } catch {
+    return list.find((s) => s.id === server.jumpId)?.label ?? 'missing server';
+  }
+};
 
 export const dependentsOf = (list: ServerProfile[], id: string): ServerProfile[] => list.filter((s) => s.jumpId === id);
 
