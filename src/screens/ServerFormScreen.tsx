@@ -2,20 +2,21 @@ import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { shortKey } from '../store/deviceKey';
-import { authOf, validateServer, type AuthMethod, type ServerInput, type ServerProfile } from '../store/servers';
+import { authOf, validateServer, type AuthMethod, type JumpOption, type ServerInput, type ServerProfile } from '../store/servers';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
   initial?: ServerProfile;
+  initialRoute?: string;
   hasSavedPassword?: boolean;
   devicePublicKey: string | null;
-  jumpOptions: ServerProfile[];
+  jumpOptions: JumpOption[];
   onCancel: () => void;
   onSave: (input: ServerInput, opts: { clearPassword: boolean }) => Promise<void>;
   onShowKey: () => void;
 };
 
-export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, jumpOptions, onCancel, onSave, onShowKey }: Props) {
+export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devicePublicKey, jumpOptions, onCancel, onSave, onShowKey }: Props) {
   const editing = Boolean(initial);
   const [label, setLabel] = useState(initial?.label ?? '');
   const [host, setHost] = useState(initial?.host ?? '');
@@ -75,7 +76,7 @@ export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, j
           <View>
             <Text style={styles.label}>Connect via</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {[{ id: undefined, label: 'Direct' }, ...jumpOptions].map((o) => {
+              {[{ id: undefined, label: 'Direct', route: [] as string[] }, ...jumpOptions].map((o) => {
                 const on = jumpId === o.id;
                 return (
                   <Pressable
@@ -84,14 +85,17 @@ export function ServerFormScreen({ initial, hasSavedPassword, devicePublicKey, j
                     onPress={() => setJumpId(o.id)}
                     style={[styles.card, { paddingVertical: 8, paddingHorizontal: 12, borderColor: on ? colors.accent : colors.border }]}
                   >
-                    <Text style={[styles.text, { color: on ? colors.accent : colors.text }]}>{o.label}</Text>
+                    <Text style={[styles.text, { color: on ? colors.accent : colors.text }]}>
+                      {o.route.length > 1 ? `${o.label} (via ${o.route.slice(0, -1).join(' → ')})` : o.label}
+                    </Text>
                   </Pressable>
                 );
               })}
             </View>
             {jumpId ? (
               <Text style={styles.muted}>
-                Hops through that server (like ssh -J). Use the host as the jump server sees it, e.g. a LAN IP.
+                Route: {[...(jumpOptions.find((o) => o.id === jumpId)?.route ?? [initial?.jumpId === jumpId && initialRoute ? initialRoute : 'unavailable server']), 'this server'].join(' → ')}
+                {'\n'}Hops through each server in turn (like ssh -J). Use the host as the last hop sees it, e.g. a LAN IP.
               </Text>
             ) : null}
           </View>

@@ -82,6 +82,47 @@ class JumpIntegrationTest {
   }
 
   @Test
+  fun chainsTwoJumpHostsToReachTheTarget() {
+    val t = target()
+    val first = jumpHost(t)
+    val scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    try {
+      val second = session(t.user, "127.0.0.1", 22, PinnedHostKeyRepository(probe(t.user, "127.0.0.1", 22, first)), first).apply {
+        setPassword(t.pw)
+        setConfig("PreferredAuthentications", "password")
+        JumpProxy.connect(this, 10_000, scheduler)
+      }
+      try {
+        val innerKey = probe(t.user, "127.0.0.1", 22, second)
+        val inner = session(t.user, "127.0.0.1", 22, PinnedHostKeyRepository(innerKey), second).apply {
+          setPassword(t.pw)
+          setConfig("PreferredAuthentications", "password")
+          JumpProxy.connect(this, 10_000, scheduler)
+        }
+        try {
+          val ch = inner.openChannel("direct-streamlocal@openssh.com") as ChannelDirectStreamLocal
+          ch.socketPath = "/home/${t.user}/.config/herdr/herdr.sock"
+          val input = ch.inputStream
+          ch.connect(10_000)
+          ch.outputStream.apply { write("{\"id\":\"j2\",\"method\":\"ping\",\"params\":{}}\n".toByteArray()); flush() }
+          val line = input.bufferedReader().readLine()
+          assertTrue(line, line.contains("\"id\":\"j2\"") && line.contains("pong"))
+          ch.disconnect()
+        } finally {
+          inner.disconnect()
+        }
+        assertTrue("second hop survives the inner disconnect", second.isConnected)
+      } finally {
+        second.disconnect()
+      }
+      assertTrue("first hop survives the second disconnect", first.isConnected)
+    } finally {
+      scheduler.shutdownNow()
+      first.disconnect()
+    }
+  }
+
+  @Test
   fun wrongInnerPinFailsBeforeAuth() {
     val t = target()
     val jump = jumpHost(t)

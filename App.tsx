@@ -36,7 +36,7 @@ import { Busy, MODAL_SWAP_MS, colors } from './src/screens/ui';
 import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, isRetryableSshError, probeHostKey, type JumpHost } from './src/ssh/connection';
 import { decidePin, pinHost, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
-import { dependentsOf, endpointInUse, jumpCandidates, type ServerProfile } from './src/store/servers';
+import { dependentsOf, endpointInUse, jumpChain, jumpOptions, routeLabel, type ServerProfile } from './src/store/servers';
 import { AuditLog, type AuditEntry } from './src/store/audit';
 import { PaneFlags, formatUntil, nextClockTime, snoozePresets } from './src/store/paneFlags';
 import { ViewedStore } from './src/store/viewed';
@@ -308,14 +308,16 @@ export default function App() {
   );
 
   const jumpFor = useCallback(
-    async (server: ServerProfile): Promise<JumpHost | undefined> => {
-      if (!server.jumpId) return undefined;
-      const jump = (await servers.list()).find((s) => s.id === server.jumpId);
-      if (!jump) throw new Error(`The jump server for ${server.label} was removed. Edit ${server.label} to pick another.`);
-      if (jump.jumpId) throw new Error(`${jump.label} hops through another server; only one hop is supported.`);
-      const pin = await pins.get(pinHost(jump), jump.port);
-      if (!pin) throw new Error(`Connect to ${jump.label} directly once to verify its host key, then try again.`);
-      return { label: jump.label, params: { ...jump, ...(await credentialsFor(jump)) }, pin };
+    async (server: ServerProfile): Promise<JumpHost[]> => {
+      if (!server.jumpId) return [];
+      const route = jumpChain(await servers.list(), server);
+      const hops: JumpHost[] = [];
+      for (const hop of route) {
+        const pin = await pins.get(pinHost(hop), hop.port);
+        if (!pin) throw new Error(`Connect to ${hop.label} once to verify its host key, then try again.`);
+        hops.push({ label: hop.label, params: { ...hop, ...(await credentialsFor(hop)) }, pin });
+      }
+      return hops;
     },
     [servers, pins, credentialsFor],
   );
@@ -494,8 +496,8 @@ export default function App() {
     async (server: ServerProfile) => {
       setError(null);
       const id = ++attempt.current;
-      const via = list.find((x) => x.id === server.jumpId);
-      const target = `${server.username}@${server.host}:${server.port}${via ? ` via ${via.label}` : ''}`;
+      const via = routeLabel(list, server);
+      const target = `${server.username}@${server.host}:${server.port}${via ? ` via ${via}` : ''}`;
       progress.current = { step: 0, target, startedAt: Date.now(), notes: {} };
       try {
         const presented = await step(id, 0, async () => probeHostKey(server.host, server.port, await jumpFor(server)), (k) => k.algorithm);
@@ -637,7 +639,7 @@ export default function App() {
       screen = (
         <ServersScreen
           servers={list}
-          jumpLabel={(s) => list.find((x) => x.id === s.jumpId)?.label}
+          jumpLabel={(s) => routeLabel(list, s)}
           error={error}
           onAdd={() => setRoute({ name: 'add' })}
           onOpen={open}
@@ -657,7 +659,8 @@ export default function App() {
           initial={route.name === 'edit' ? route.server : undefined}
           hasSavedPassword={route.name === 'edit' && route.hasPassword}
           devicePublicKey={account.publicKey}
-          jumpOptions={jumpCandidates(list, route.name === 'edit' ? route.server.id : undefined)}
+          jumpOptions={jumpOptions(list, route.name === 'edit' ? route.server.id : undefined)}
+          initialRoute={route.name === 'edit' ? routeLabel(list, route.server) : undefined}
           onShowKey={() => setRoute({ name: 'settings' })}
           onCancel={home}
           onSave={async (input, opts) => {
@@ -726,7 +729,7 @@ export default function App() {
           server={route.server}
           decision={route.decision}
           previous={route.previous}
-          via={list.find((x) => x.id === route.server.jumpId)?.label}
+          via={routeLabel(list, route.server)}
           onCancel={home}
           onTrust={() => trust(route.server, route.decision)}
         />

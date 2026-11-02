@@ -72,11 +72,14 @@ export class JumpHostError extends Error {
   }
 }
 
-async function openJump(jump: JumpHost): Promise<ServerConnection> {
+async function openRoute(route: JumpHost[]): Promise<ServerConnection | null> {
+  if (route.length === 0) return null;
+  const last = route[route.length - 1];
   try {
-    return await ServerConnection.open(jump.params, jump.pin);
+    return await ServerConnection.open(last.params, last.pin, route.slice(0, -1));
   } catch (e) {
-    throw new JumpHostError(jump.label, e);
+    if (e instanceof JumpHostError) throw e;
+    throw new JumpHostError(last.label, e);
   }
 }
 
@@ -86,8 +89,8 @@ export class ServerConnection {
     private readonly jump: ServerConnection | null = null,
   ) {}
 
-  static async open(p: ConnectParams, pin: HostKeyPin, via?: JumpHost): Promise<ServerConnection> {
-    const jump = via ? await openJump(via) : null;
+  static async open(p: ConnectParams, pin: HostKeyPin, route: JumpHost[] = []): Promise<ServerConnection> {
+    const jump = await openRoute(route);
     try {
       const id = await HerdrSsh.connect(
         p.host,
@@ -104,9 +107,9 @@ export class ServerConnection {
     }
   }
 
-  static async probeHostKey(host: string, port: number, via?: JumpHost): Promise<HostKeyInfo> {
-    if (!via) return HerdrSsh.probeHostKey(host, port, null);
-    const jump = await openJump(via);
+  static async probeHostKey(host: string, port: number, route: JumpHost[] = []): Promise<HostKeyInfo> {
+    const jump = await openRoute(route);
+    if (!jump) return HerdrSsh.probeHostKey(host, port, null);
     try {
       return await HerdrSsh.probeHostKey(host, port, jump.sessionId);
     } finally {
