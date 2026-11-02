@@ -14,6 +14,7 @@ import {
 } from '../protocol/sessions';
 import type { Transport } from '../protocol/transport';
 import { ConnectStepError, parseHerdrVersion } from '../live/connectSteps';
+import type { HostKeyInfo } from '../../modules/herdr-ssh';
 import type { HostKeyPin } from './pinning';
 
 const FORWARDING_PROHIBITED_TEXT =
@@ -57,12 +58,60 @@ class SshSocketTransport implements Transport {
 
 export type ConnectParams = { host: string; port: number; username: string; password?: string; privateKey?: string };
 
-export class ServerConnection {
-  private constructor(private readonly sessionId: string) {}
+export type JumpHost = { label: string; params: ConnectParams; pin: HostKeyPin };
 
-  static async open(p: ConnectParams, pin: HostKeyPin): Promise<ServerConnection> {
-    const id = await HerdrSsh.connect(p.host, p.port, p.username, { password: p.password, privateKey: p.privateKey }, pin.key);
-    return new ServerConnection(id);
+export class JumpHostError extends Error {
+  constructor(
+    readonly label: string,
+    readonly cause: unknown,
+  ) {
+    super(`Jump host ${label}: ${describeSshError(cause)}`);
+  }
+  get code(): string | undefined {
+    return (this.cause as { code?: string })?.code;
+  }
+}
+
+async function openJump(jump: JumpHost): Promise<ServerConnection> {
+  try {
+    return await ServerConnection.open(jump.params, jump.pin);
+  } catch (e) {
+    throw new JumpHostError(jump.label, e);
+  }
+}
+
+export class ServerConnection {
+  private constructor(
+    private readonly sessionId: string,
+    private readonly jump: ServerConnection | null = null,
+  ) {}
+
+  static async open(p: ConnectParams, pin: HostKeyPin, via?: JumpHost): Promise<ServerConnection> {
+    const jump = via ? await openJump(via) : null;
+    try {
+      const id = await HerdrSsh.connect(
+        p.host,
+        p.port,
+        p.username,
+        { password: p.password, privateKey: p.privateKey },
+        pin.key,
+        jump?.sessionId ?? null,
+      );
+      return new ServerConnection(id, jump);
+    } catch (e) {
+      jump?.close();
+      throw e;
+    }
+  }
+
+  static async probeHostKey(host: string, port: number, via?: JumpHost): Promise<HostKeyInfo> {
+    if (!via) return HerdrSsh.probeHostKey(host, port, null);
+    const jump = await openJump(via);
+    try {
+      return await HerdrSsh.probeHostKey(host, port, jump.sessionId);
+    } finally {
+      jump.close();
+    }
   }
 
   async herdrVersion(herdrPath?: string): Promise<string | null> {
@@ -121,18 +170,19 @@ export class ServerConnection {
 
   close() {
     HerdrSsh.disconnect(this.sessionId);
+    this.jump?.close();
   }
 }
 
-export const probeHostKey = (host: string, port: number) => HerdrSsh.probeHostKey(host, port);
+export const probeHostKey = ServerConnection.probeHostKey;
 
 export function isRetryableSshError(e: unknown): boolean {
   const code = (e as { code?: string })?.code;
-  return code === 'ERR_CONNECT' || code === 'ERR_TIMEOUT' || code === 'ERR_SSH';
+  return code === 'ERR_CONNECT' || code === 'ERR_TIMEOUT' || code === 'ERR_SSH' || code === 'ERR_JUMP_UNREACHABLE';
 }
 
 export function describeSshError(e: unknown): string {
-  if (e instanceof ConnectStepError) return e.message;
+  if (e instanceof ConnectStepError || e instanceof JumpHostError) return e.message;
   const code = (e as { code?: string })?.code;
   const msg = (e as { message?: string })?.message ?? String(e);
   if (/canceled the authentication|User canceled|authentication was canceled/i.test(msg)) {
@@ -150,6 +200,10 @@ export function describeSshError(e: unknown): string {
       return 'Connection timed out.';
     case 'ERR_FORWARDING_PROHIBITED':
       return FORWARDING_PROHIBITED_TEXT;
+    case 'ERR_JUMP_PROHIBITED':
+      return "The jump host's sshd doesn't allow TCP forwarding (AllowTcpForwarding). Enable it there to hop to this server.";
+    case 'ERR_JUMP_UNREACHABLE':
+      return 'The jump host could not reach this server. Check the address is reachable from the jump host and sshd is running.';
     case 'ERR_SOCKET_UNAVAILABLE':
       return "Herdr isn't running on this server (its socket isn't accepting connections).";
     case 'ERR_CONNECT':

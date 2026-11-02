@@ -39,6 +39,7 @@ private class StreamChannel(val channel: ChannelDirectStreamLocal, val out: Outp
 
 class HerdrSshModule : Module() {
   private val io = Executors.newCachedThreadPool()
+  private val watchdog = Executors.newSingleThreadScheduledExecutor()
   private val sessions = ConcurrentHashMap<String, Session>()
   private val channels = ConcurrentHashMap<String, StreamChannel>()
   private var keepAliveTask: Int? = null
@@ -48,12 +49,12 @@ class HerdrSshModule : Module() {
 
     Events("onChannelData", "onChannelClose")
 
-    AsyncFunction("probeHostKey") { host: String, port: Int, promise: Promise ->
+    AsyncFunction("probeHostKey") { host: String, port: Int, viaSessionId: String?, promise: Promise ->
       run(promise) {
         val repo = PinnedHostKeyRepository(null)
-        val session = newSession(host, port, "probe", repo)
+        val session = newSession(JSch(), host, port, "probe", repo, viaSessionId)
         try {
-          session.connect(CONNECT_TIMEOUT_MS)
+          connectWithDeadline(session, viaSessionId != null)
           session.disconnect()
           throw SshError("ERR_PROBE", "server accepted the probe without host key verification")
         } catch (e: JSchUnknownHostKeyException) {
@@ -71,7 +72,7 @@ class HerdrSshModule : Module() {
       run(promise) { Keys.generateEd25519(comment) }
     }
 
-    AsyncFunction("connect") { host: String, port: Int, username: String, auth: Map<String, Any?>, pinnedKey: String, promise: Promise ->
+    AsyncFunction("connect") { host: String, port: Int, username: String, auth: Map<String, Any?>, pinnedKey: String, viaSessionId: String?, promise: Promise ->
       run(promise) {
         val pinned = decodeKey(pinnedKey)
         val password = (auth["password"] as? String)?.takeIf { it.isNotEmpty() }
@@ -86,7 +87,7 @@ class HerdrSshModule : Module() {
             throw SshError("ERR_ARGS", "stored private key is unreadable", e)
           }
         }
-        val session = newSession(jsch, host, port, username, repo)
+        val session = newSession(jsch, host, port, username, repo, viaSessionId)
         session.setConfig(
           "PreferredAuthentications",
           listOfNotNull(privateKey?.let { "publickey" }, password?.let { "password,keyboard-interactive" }).joinToString(","),
@@ -96,7 +97,7 @@ class HerdrSshModule : Module() {
           session.setPassword(password)
         }
         try {
-          session.connect(CONNECT_TIMEOUT_MS)
+          connectWithDeadline(session, viaSessionId != null)
         } catch (e: JSchException) {
           session.disconnect()
           throw mapConnectError(e, repo)
@@ -200,6 +201,7 @@ class HerdrSshModule : Module() {
       channels.values.forEach { it.channel.disconnect() }
       sessions.values.forEach { it.disconnect() }
       io.shutdownNow()
+      watchdog.shutdownNow()
     }
   }
 
@@ -230,17 +232,25 @@ class HerdrSshModule : Module() {
     }
   }
 
-  private fun newSession(host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session =
-    newSession(JSch(), host, port, user, repo)
-
-  private fun newSession(jsch: JSch, host: String, port: Int, user: String, repo: PinnedHostKeyRepository): Session {
+  private fun newSession(
+    jsch: JSch, host: String, port: Int, user: String, repo: PinnedHostKeyRepository, viaSessionId: String?,
+  ): Session {
     jsch.hostKeyRepository = repo
     val session = jsch.getSession(user, host, port)
+    if (viaSessionId != null) {
+      val via = sessions[viaSessionId]?.takeIf { it.isConnected }
+        ?: throw SshError("ERR_JUMP_UNREACHABLE", "the jump host connection was lost")
+      session.setProxy(JumpProxy(via))
+    }
     session.setConfig("StrictHostKeyChecking", "yes")
     session.setConfig("HashKnownHosts", "no")
     session.setServerAliveInterval(10_000)
     session.setServerAliveCountMax(3)
     return session
+  }
+
+  private fun connectWithDeadline(session: Session, proxied: Boolean) {
+    if (proxied) JumpProxy.connect(session, CONNECT_TIMEOUT_MS, watchdog) else session.connect(CONNECT_TIMEOUT_MS)
   }
 
   private fun requireSession(id: String): Session {
@@ -259,6 +269,15 @@ class HerdrSshModule : Module() {
     }
     if (e is JSchUnknownHostKeyException) {
       return SshError("ERR_HOSTKEY_MISMATCH", "host key not pinned", e)
+    }
+    val jump = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<JumpChannelException>().firstOrNull()
+    if (jump != null) {
+      return when (jump.reason) {
+        OPEN_ADMINISTRATIVELY_PROHIBITED -> SshError(
+          "ERR_JUMP_PROHIBITED", "the jump host's sshd refused TCP forwarding (AllowTcpForwarding)", e)
+        OPEN_CONNECT_FAILED -> SshError("ERR_JUMP_UNREACHABLE", "the jump host could not reach the target", e)
+        else -> SshError("ERR_JUMP_UNREACHABLE", jump.message ?: "jump channel failed", e)
+      }
     }
     val msg = e.message ?: ""
     return when {

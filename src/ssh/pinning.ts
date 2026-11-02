@@ -28,6 +28,10 @@ export function endpointId(host: string, port: number): string {
   return `${host.trim().toLowerCase()}:${port}`;
 }
 
+export function pinHost(s: { host: string; jumpId?: string }): string {
+  return s.jumpId ? `${s.jumpId}>${s.host}` : s.host;
+}
+
 function storageKey(host: string, port: number, prefix = 'pin'): string {
   const id = endpointId(host, port);
   let hex = '';

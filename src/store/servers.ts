@@ -1,5 +1,5 @@
 import { validateHerdrPath } from '../protocol/sessions';
-import { endpointId, type KeyValueStore } from '../ssh/pinning';
+import { endpointId, pinHost, type KeyValueStore } from '../ssh/pinning';
 
 export type AuthMethod = 'key' | 'password';
 
@@ -11,6 +11,7 @@ export type ServerProfile = {
   username: string;
   auth?: AuthMethod;
   herdrPath?: string;
+  jumpId?: string;
 };
 
 const INDEX_KEY = 'servers.v1';
@@ -24,11 +25,30 @@ export type ServerInput = {
   auth?: AuthMethod;
   password: string;
   herdrPath?: string;
+  jumpId?: string;
 };
 
-export function endpointInUse(list: Pick<ServerProfile, 'host' | 'port'>[], host: string, port: number): boolean {
-  return list.some((o) => endpointId(o.host, o.port) === endpointId(host, port));
+type PinTarget = { host: string; port: number; jumpId?: string };
+
+export function endpointInUse(list: PinTarget[], target: PinTarget): boolean {
+  const id = endpointId(pinHost(target), target.port);
+  return list.some((o) => endpointId(pinHost(o), o.port) === id);
 }
+
+export const jumpCandidates = (list: ServerProfile[], selfId?: string): ServerProfile[] =>
+  list.some((s) => selfId !== undefined && s.jumpId === selfId) ? [] : list.filter((s) => s.id !== selfId && !s.jumpId);
+
+export function validateJump(list: ServerProfile[], selfId: string | undefined, jumpId: string | undefined): string | null {
+  if (!jumpId) return null;
+  if (jumpId === selfId) return 'A server cannot hop through itself';
+  const jump = list.find((s) => s.id === jumpId);
+  if (!jump) return 'The jump server no longer exists';
+  if (jump.jumpId) return `${jump.label} already hops through another server; only one hop is supported`;
+  if (selfId && list.some((s) => s.jumpId === selfId)) return 'Other servers hop through this one, so it must connect directly';
+  return null;
+}
+
+export const dependentsOf = (list: ServerProfile[], id: string): ServerProfile[] => list.filter((s) => s.jumpId === id);
 
 export const authOf = (s: Pick<ServerProfile, 'auth'>): AuthMethod => s.auth ?? 'password';
 
@@ -63,7 +83,7 @@ export class ServerStore {
   }
 
   async add(input: ServerInput): Promise<ServerProfile> {
-    const err = validateServer(input);
+    const err = validateServer(input) ?? validateJump(await this.list(), undefined, input.jumpId);
     if (err) throw new Error(err);
     const profile = this.toProfile(this.newId(), input);
     if (input.password) await this.secrets.setItem(passwordKey(profile.id), input.password);
@@ -76,7 +96,7 @@ export class ServerStore {
     const i = all.findIndex((s) => s.id === id);
     if (i < 0) throw new Error('Server not found');
     const hasSavedPassword = !opts.clearPassword && (await this.secrets.getItem(passwordKey(id))) !== null;
-    const err = validateServer(input, { hasSavedPassword });
+    const err = validateServer(input, { hasSavedPassword }) ?? validateJump(all, id, input.jumpId);
     if (err) throw new Error(err);
     const profile = this.toProfile(id, input);
     if (opts.clearPassword) await this.secrets.deleteItem(passwordKey(id));
@@ -87,6 +107,8 @@ export class ServerStore {
   }
 
   async remove(id: string): Promise<void> {
+    const using = dependentsOf(await this.list(), id);
+    if (using.length) throw new Error(`${using.map((s) => s.label).join(', ')} hop${using.length === 1 ? 's' : ''} through this server`);
     await this.kv.setItem(INDEX_KEY, JSON.stringify((await this.list()).filter((s) => s.id !== id)));
     await this.secrets.deleteItem(passwordKey(id));
   }
@@ -99,6 +121,7 @@ export class ServerStore {
     const host = input.host.trim();
     const username = input.username.trim();
     const herdrPath = input.herdrPath?.trim() || undefined;
+    const jumpId = input.jumpId || undefined;
     return {
       id,
       label: input.label?.trim() || `${username}@${host}`,
@@ -107,6 +130,7 @@ export class ServerStore {
       username,
       auth: authOf(input),
       ...(herdrPath ? { herdrPath } : {}),
+      ...(jumpId ? { jumpId } : {}),
     };
   }
 }
