@@ -1,0 +1,2 @@
+[global]
+exclude = ["modules/herdr-ssh/ios/vendor/libssh2/**"]

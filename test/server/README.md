@@ -1,6 +1,7 @@
 # Test servers
 
-Test-only credentials (`herdr` / `herdr-test`); bound to localhost only. From the Android emulator the host is `10.0.2.2`.
+Test-only credentials (`herdr` / `herdr-test`); bound to localhost only. From the Android emulator the host is `10.0.2.2`;
+the iOS Simulator reaches them on `127.0.0.1`.
 
 | Container | Port | Purpose |
 |-----------|------|---------|

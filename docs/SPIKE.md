@@ -95,3 +95,78 @@ Proxied sessions have no socket, so JSch can't apply its read timeout to them. T
 `JumpProxy.connect` arms a watchdog that disconnects a handshake that hasn't finished within the connect
 timeout (a target that accepts TCP and then stays silent), and native `ServerAliveInterval` doesn't detect a
 target that dies silently while the jump host stays up. The app-level liveness check (`alive()`) covers that.
+
+## 6. iOS SSH library: libssh2 1.11.1 + OpenSSL 3.6
+
+Date: 2026-11-03. The iOS half of `modules/herdr-ssh` (`modules/herdr-ssh/ios`) implements the same JS API and
+error codes as the Kotlin module.
+
+| Requirement | SwiftNIO SSH | libssh2 1.11.1 (OpenSSL backend) |
+|---|---|---|
+| `direct-streamlocal@openssh.com` | **No.** `SSHChannelType` has only `session`, `directTCPIP`, `forwardedTCPIP`, and the enum and wire parsing are internal, so it would need a fork | `libssh2_channel_direct_streamlocal_ex` |
+| `direct-tcpip` (jump hosts) | yes | `libssh2_channel_direct_tcpip_ex` |
+| Host key before credentials | yes (validation delegate) | `libssh2_session_handshake` ends after KEX; `libssh2_session_hostkey` returns the blob before any `userauth` call |
+| Ed25519 user and host keys | yes | yes with OpenSSL ≥ 1.1.1 (not with mbedTLS) |
+| Ciphers/KEX | AES-GCM only, curve25519/ECDH | the usual OpenSSH set incl. chacha20-poly1305, curve25519, DH-GEX |
+| Integration | SPM only (awkward from a CocoaPods-linked Expo module) | plain C, vendored into the pod |
+
+**Choice: libssh2.** SwiftNIO SSH can't open the Herdr socket channel without a fork. libssh2 has every
+primitive we need, but it's a C library with a non-blocking API that isn't thread-safe per session, so the
+module wraps it carefully:
+
+- **Packaging.** libssh2 1.11.1 is vendored as source in `modules/herdr-ssh/ios/vendor/libssh2` (BSD-3-Clause,
+  tarball SHA-256 `d9ec76cb…f658f7`, the same as Homebrew's) and compiled into the `HerdrSsh` pod with a
+  hand-written `libssh2_config.h`. OpenSSL comes from the `OpenSSL-Universal` pod (3.6.2000, an xcframework with
+  device and simulator slices). There's no prebuilt binary in the repo.
+- **Threading.** Each SSH session owns one loop thread, which makes every libssh2 call after login. The loop
+  runs libssh2 non-blocking, services every channel on each pass (exec, Herdr sockets, jump bridges), then
+  waits in `poll()` on the socket plus a wake pipe. A small C shim (`herdr_libssh2_pump`) drains the transport
+  each pass, so an idle session still notices the server closing it.
+- **libssh2 pitfalls the loop works around:**
+  - Channel opens keep their state per *session*, so only one open runs at a time. A timed-out open is still
+    driven to completion before the next one starts. The catch is that a direct-tcpip open to a host that
+    drops SYNs holds the slot until sshd gives up.
+  - libssh2 has one outbound packet buffer per session, and a half-sent packet can only be finished by a call
+    with the same buffer. No other packet goes out before it.
+    - Before a channel is freed, the shim (`herdr_libssh2_channel_flush_owned`) finishes any half-sent packet
+      that belongs to it (data, window adjust, exec request).
+    - `closeChannel` sends queued writes first, for up to 5 s.
+    - The vendored `transport.c` carries one patch (`vendor/libssh2/PATCHES.md`): such a continuation is sent
+      before a server-initiated rekey takes over. Otherwise a rekey during a half-sent packet deadlocks the
+      session.
+  - `libssh2_session_free` would try to close open channels over the socket and, being non-blocking, give up
+    and leak. The shim marks the socket disconnected first, and the native test checks that every session is
+    freed.
+  - Keepalives use `want_reply=0`, because libssh2 queues every reply packet forever, and a 1-byte reply makes
+    `libssh2_poll_channel_read` fail.
+  - A command killed by a signal has no exit status. libssh2 reports 0 there; the module reports -1, as JSch
+    does. Known gap: a channel that sshd closes with neither an exit status nor an exit signal still reports 0
+    (JSch reports -1).
+- **Pin before auth.** Same as Android: probe = handshake → read the host key → disconnect. Connect =
+  handshake → constant-time compare with the pin → `ERR_HOSTKEY_MISMATCH` before `userauth_list` ever runs.
+  Auth order is publickey (device key), then password, then keyboard-interactive (one non-echo password prompt).
+- **Jump hosts.** The next hop's session runs over one end of a `socketpair`. The previous hop's loop pumps
+  the other end through a `direct-tcpip` channel, so the chain is arbitrarily deep, and closing a hop
+  closes the sockets of everything behind it. The 15 s connect deadline covers the channel open, the
+  handshake and auth, so a target that accepts TCP and then stays silent fails with `ERR_TIMEOUT`. Open
+  failure reason 1/2 → `ERR_JUMP_PROHIBITED`/`ERR_JUMP_UNREACHABLE` (libssh2 reports the reason as fixed text).
+- **Liveness.** libssh2 has no ServerAliveCountMax. Direct sockets use TCP keepalive (10 s idle, 3 × 10 s
+  probes). Sessions behind a jump host have no socket of their own. A target that dies silently while the
+  jump host stays up is caught only by the app's `alive()` check. Android covers that case with
+  ServerAliveCountMax on every hop.
+- **Host key algorithm preference** is ed25519 → ECDSA → RSA (JSch's order), so a server offering several
+  keys pins the same one on both platforms.
+
+Platform differences:
+
+- `startMonitoring`: iOS has no foreground service. The module requests background time when the app leaves
+  the foreground (about 30 s), and iOS then suspends the app. Connections drop and the app reconnects on
+  return. Agent alerts can't arrive while the app is suspended.
+- `setSecureScreen`: iOS apps can't block screenshots, so the module covers the window while the app is
+  inactive. That keeps the terminal out of the app-switcher snapshot.
+- Credentials: `expo-secure-store` uses the Keychain. The biometric vault (`requireAuthentication`) uses
+  Face ID/Touch ID with `NSFaceIDUsageDescription` from the `expo-local-authentication` plugin.
+
+Native test: `HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222 HERDR_TEST_NOFWD=127.0.0.1:2223
+modules/herdr-ssh/ios/tests/run.sh` builds the same Swift core plus libssh2 for macOS and runs the
+probe/pin/auth/exec/socket/key/jump/multi-hop cases against the Docker servers.

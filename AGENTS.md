@@ -27,7 +27,7 @@ Run lint and typecheck before declaring any task done.
 
 - Product spec: docs/SPEC.md. Server protocol: Herdr public docs/source.
 - Navigation is a small state machine in `App.tsx` (four screens); no router yet.
-- SSH lives in the local Expo module `modules/herdr-ssh` (Kotlin, JSch). Native changes need a rebuild: `npx expo run:android`.
+- SSH lives in the local Expo module `modules/herdr-ssh`: Android in Kotlin (JSch), iOS in Swift over vendored libssh2 + OpenSSL (docs/SPIKE.md §6). Both must keep the same JS API and error codes. Native changes need a rebuild: `npx expo run:android` / `npx expo run:ios`. iOS core test: `modules/herdr-ssh/ios/tests/run.sh`.
 - Host keys: never send credentials before the host key is pinned and matches (see docs/SPIKE.md).
 - No unsigned OTA updates (SPEC non-goal); don't add `expo-updates`/EAS Update.
 - `ios/` and `android/` are generated (Continuous Native Generation). Never edit them by hand; configure via `app.json` and config plugins.
