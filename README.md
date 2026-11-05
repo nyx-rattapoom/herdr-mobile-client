@@ -1,12 +1,13 @@
 # herdr-client
 
-Open-source mobile client for [Herdr](https://github.com/herdrdev/herdr) (Expo React Native, Android first).
+Open-source mobile client for [Herdr](https://github.com/herdrdev/herdr) (Expo React Native, Android and iOS).
 
 See [docs/SPEC.md](docs/SPEC.md) for the product spec.
 
 ## Status
 
-M1–M5 from [docs/SPEC.md](docs/SPEC.md) are implemented on Android. Per-milestone evidence is in
+M1–M5 from [docs/SPEC.md](docs/SPEC.md) are implemented on Android. iOS uses the same app with a libssh2-based
+SSH module (see [docs/SPIKE.md](docs/SPIKE.md) §6 for what differs). Per-milestone evidence is in
 [docs/PROGRESS.md](docs/PROGRESS.md), and the design is in [docs/SPIKE.md](docs/SPIKE.md).
 
 - SSH straight to Herdr's socket (direct-streamlocal). Nothing is uploaded to the server. The host key is shown and
@@ -19,18 +20,21 @@ M1–M5 from [docs/SPEC.md](docs/SPEC.md) are implemented on Android. Per-milest
 - Live sessions → workspaces → tabs → panes. Pane output with scrollback. Text, keys and agent prompts. Focus,
   create and close tabs, panes and workspaces (closes ask for confirmation).
 - Agent status and local notifications when an agent is blocked or finishes, kept alive in the background by a
-  foreground service (limits are in PROGRESS.md).
+  foreground service on Android (limits are in PROGRESS.md). iOS only gets a short grace period in the background.
 - Installs Herdr with the official installer when it's missing, or starts its server.
 
-Future: paired-device mode (M6), iOS.
+Future: paired-device mode (M6).
 
 ```bash
 npm install
 npx expo run:android          # dev build (JDK 17)
+npx expo run:ios              # dev build (Xcode, CocoaPods)
 npm test                      # jest
 npm run typecheck && npx expo lint
 # Native tests; integration tests run against test/server when HERDR_TEST_SSH is set
 cd android && HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222 ./gradlew :herdr-ssh:testDebugUnitTest
+# iOS SSH core (same Swift + libssh2, built for macOS)
+HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222 HERDR_TEST_NOFWD=127.0.0.1:2223 modules/herdr-ssh/ios/tests/run.sh
 ```
 
 ## License

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { shortKey } from '../store/deviceKey';
 import { authOf, validateServer, type AuthMethod, type JumpOption, type ServerInput, type ServerProfile } from '../store/servers';
@@ -35,9 +35,11 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
     const err = validateServer(input, { hasSavedPassword: hasSavedPassword && !clearPassword });
     if (err) return setError(err);
     setSaving(true);
+    setPassword('');
     try {
       await onSave(input, { clearPassword });
     } catch (e) {
+      setPassword(password);
       setError(e instanceof Error ? e.message : String(e));
       setSaving(false);
     }
@@ -133,6 +135,7 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
 
         {field('password', auth === 'key' ? 'Password (fallback)' : 'Password', password, setPassword, {
           secureTextEntry: true,
+          autoComplete: 'off',
           placeholder: editing && hasSavedPassword && !clearPassword ? '••••••' : '',
         })}
         {passwordHint ? <Text style={styles.muted}>{passwordHint}</Text> : null}
@@ -146,8 +149,9 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
 
         {field('herdr', 'Herdr path on server (optional)', herdrPath, setHerdrPath, { placeholder: '~/.local/bin/herdr' })}
         <Text style={styles.muted}>
-          Only needed if herdr is not on the login shell&apos;s PATH. Credentials are kept in Android Keystore-backed
-          storage and are only sent after the host key is confirmed.
+          Only needed if herdr is not on the login shell&apos;s PATH. Credentials are kept in{' '}
+          {Platform.OS === 'ios' ? 'the iOS Keychain' : 'Android Keystore-backed storage'} and are only sent after the
+          host key is confirmed.
         </Text>
         <Button testID="save-server" label="Save" onPress={save} disabled={saving} />
       </ScrollView>

@@ -1,4 +1,4 @@
-import { ScrollView, Switch, Text, View } from 'react-native';
+import { Platform, ScrollView, Switch, Text, View } from 'react-native';
 
 import { MAX_ENTRIES, type AuditEntry } from '../store/audit';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
@@ -103,7 +103,7 @@ export function SettingsScreen(p: Props) {
             <Text style={styles.muted}>
               {p.biometricAvailable
                 ? 'Passwords and the device private key are unlocked with your fingerprint or face when connecting.'
-                : 'Unavailable: enroll a fingerprint or face in Android settings first.'}
+                : `Unavailable: enroll a fingerprint or face in ${Platform.OS === 'ios' ? 'iOS' : 'Android'} settings first.`}
             </Text>
           </View>
           <Switch
@@ -116,8 +116,12 @@ export function SettingsScreen(p: Props) {
 
         <View style={[styles.card, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.text}>Hide app content from screenshots</Text>
-            <Text style={styles.muted}>Blocks screenshots, screen recording and the recent-apps preview (FLAG_SECURE).</Text>
+            <Text style={styles.text}>{Platform.OS === 'ios' ? 'Hide app content in the app switcher' : 'Hide app content from screenshots'}</Text>
+            <Text style={styles.muted}>
+              {Platform.OS === 'ios'
+                ? 'Covers the screen whenever the app is in the background, so the app switcher shows no terminal contents. iOS does not let apps block screenshots.'
+                : 'Blocks screenshots, screen recording and the recent-apps preview (FLAG_SECURE).'}
+            </Text>
           </View>
           <Switch testID="secure-screen-toggle" value={p.secureScreen} onValueChange={p.onToggleSecureScreen} />
         </View>

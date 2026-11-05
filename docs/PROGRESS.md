@@ -360,3 +360,57 @@ In 1.1.4, after a while you couldn't scroll an agent's output up or down. Reprod
 - **A drag pulled back to the end.** Following the end no longer scrolls while a finger is on the list.
 - **Every visible row redrawn on each poll.** `useCellMetrics` made a new metrics object each render, so the memoized `TermRow` never skipped. It's now one object per size. Measured with temporary logging: commits went from about 28 ms to about 17 ms with 2500–3000 kept rows; polls stayed at about 1.12 s either way, so this was not what stopped scrolling.
 - Emulator, 1.1.5: scrolled back to row 733 at 30 s, still on row 733 at 230 s (about 4600 rows printed) and scrolling both ways; ↓ Latest followed the end and kept following. The one gap marker seen came when the emulator was starting a screen recording, which delayed a poll past a screenful at 20 rows a second.
+
+## iOS (2026-11-03)
+
+The app now builds and runs on iOS. The SSH module has a Swift implementation over vendored libssh2 1.11.1 +
+OpenSSL 3.6 with the same JS API and error codes as the Kotlin one. The library choice and design are in
+SPIKE.md §6. The JS side is unchanged apart from platform wording, plus one iOS fix: the server form clears its
+password field before leaving, so iOS no longer offers to save server passwords to the user's Passwords app.
+
+- **Native core test** (`modules/herdr-ssh/ios/tests/run.sh`): the same Swift sources plus libssh2, built for macOS,
+  against `herdr-test` (:2222) and `herdr-test-old` (:2226), all passing. It covers probe (stable, matches the
+  server's `ssh-keygen -lf`), wrong pin → `ERR_HOSTKEY_MISMATCH`, wrong password → `ERR_AUTH`, no credentials →
+  `ERR_ARGS`, closed port → `ERR_CONNECT`; exec (stdout/stderr/exit code, UTF-8, 300 kB output, > 1 MiB →
+  `ERR_EXEC`, timeout → `ERR_TIMEOUT` with the session still usable); a Herdr ping and `events.subscribe` over
+  direct-streamlocal; 4 parallel execs while a socket channel is open; server close → `onChannelClose(eof)`;
+  `closeChannel`; write after close → `ERR_NO_CHANNEL`; missing socket → `ERR_SOCKET_UNAVAILABLE`; a generated
+  Ed25519 key (authorized → key-only login, unauthorized → `ERR_AUTH`); jump host probe and connect; a wrong
+  inner pin; jump to a closed port → `ERR_JUMP_UNREACHABLE`; three hops with a subscription at the far end; an inner
+  disconnect closes its channels and leaves the hop up; closing the first hop ends everything behind it; and
+  `AllowStreamLocalForwarding no` (:2223).
+- **iPhone 17 Pro simulator (iOS 26.5)**, debug build, driven headlessly with AXe:
+  - Probe and pin: "Verify host key" shows `ssh-ed25519 SHA256:9LrZ…AY/o`, the server's real fingerprint
+    (`screenshots/ios/ios-01-hostkey-confirm.png`).
+  - Password login → live Herdr 0.9.3 session (`ios-02-connected.png`). Typed input: `echo hello-from-ios-$((6*7))
+    && uname -s` printed `hello-from-ios-42` / `Linux` (`ios-03-typed-input.png`).
+  - Device key: generated on the simulator, key-only server → live. sshd logged `Accepted publickey … ED25519
+    SHA256:HXFs…6NA`, the fingerprint of the key the app generated (`ios-04-key-auth-connected.png`).
+  - Host key mismatch: the pinned endpoint was switched (via a local TCP forwarder) to a server with a different
+    key. Connection blocked, showing pinned vs presented fingerprints (`ios-05-hostkey-mismatch.png`). That
+    server's sshd logged only `Disconnected … [preauth]`: no credentials were sent.
+  - Multi-hop: phone → mh-internal (:2240, password) → mh-pi (10.77.0.20, device key only) → mh-target
+    (192.168.88.111, password). Each hop was probed through the previous one and its fingerprint matched the
+    container's key (`ios-06-multihop-hostkey.png`). mh-pi logged `Accepted publickey` for the simulator's key
+    from mh-internal's address, and mh-target logged a password login from mh-pi's LAN address. Typed `echo
+    multihop-ios-ok; hostname` came back as `multihop-ios-ok` / `a0156aead59f`, mh-target's hostname
+    (`ios-07-multihop-live.png`).
+  - Biometrics: with a simulated Face ID enrolled, turning on "Require biometrics" showed the Face ID sheet and
+    the simulated match enabled it. "Hide app content in the app switcher" covered the app while the sheet made it
+    inactive (`ios-08-faceid-prompt.png`).
+- **Not verified on the simulator:** a Face ID prompt when the biometry-protected Keychain item is *read*.
+  Connecting after enabling the vault went through without a prompt, even after a simulated non-match. The
+  expo-secure-store item is written with `SecAccessControl(.biometryCurrentSet)`, and as far as I know the
+  simulator doesn't enforce Keychain access control, but that isn't confirmed. Check this on a device before an
+  iOS release.
+- **Independent review:** a code review of the native module found these, all fixed and re-verified:
+  - libssh2 sessions leaked on every disconnect. The native test now counts live sessions; it reports 2 left
+    with the fix reverted and 0 with it.
+  - A session could wedge when a channel was freed, or a rekey arrived, while a packet was half-sent. Fixed with
+    a shim and a one-line libssh2 patch (`vendor/libssh2/PATCHES.md`).
+  - A killed command reported exit 0 (now -1).
+  - Smaller fixes: a wake-pipe fd race, blocked GCD threads, error-code parity with Android, and spin guards.
+  - After the fixes the simulator flows were repeated on the rebuilt app (multi-hop live session, typed input).
+- **Known iOS limits:** no background monitoring beyond the ~30 s grace period iOS grants (no foreground
+  service; agent alerts need the app open). Apps can't block screenshots (only the app-switcher snapshot is
+  covered). Dead peers behind a jump host are detected by the app's `alive()` check, not by SSH keepalive.
