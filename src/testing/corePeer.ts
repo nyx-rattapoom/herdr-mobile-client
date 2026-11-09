@@ -56,6 +56,8 @@ export class TestCore {
   nextChannel = 5;
   doc: unknown = CORE_LAYOUT_DOC;
   docVersion = 1;
+  /** The last event sequence this core produced; subscribe snapshots report it. */
+  seq = 10;
   /** Methods whose next request is refused once with a transient error. */
   failOnce = new Set<string>();
 
@@ -68,6 +70,8 @@ export class TestCore {
   }
 
   event(message: unknown): void {
+    const seq = (message as { params?: { seq?: unknown } }).params?.seq;
+    if (typeof seq === 'number' && seq > this.seq) this.seq = seq;
     this.t.push(encodeFrame(2, FRAME.DATA, encodeUtf8(`${JSON.stringify(message)}\n`)));
   }
 
@@ -123,7 +127,7 @@ export class TestCore {
         return;
       case 'events.subscribe':
         this.subscribeCount++;
-        reply({ seq: 10, terminals: [...this.terminals.values()], channel: 2 });
+        reply({ seq: this.seq, terminals: [...this.terminals.values()], channel: 2 });
         return;
       case 'doc.get':
         this.docReads++;
@@ -140,6 +144,7 @@ export class TestCore {
           else (now.labels as Record<string, string>)[k] = v;
         }
         this.terminals.set(address, now);
+        this.event({ jsonrpc: '2.0', method: 'event', params: { seq: this.seq + 1, type: 'labels', terminal: address, data: { labels: now.labels } } });
         reply(now);
         return;
       }

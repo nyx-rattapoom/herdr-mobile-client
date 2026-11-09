@@ -3,7 +3,7 @@ import { CorePane } from './CorePane';
 import { emptyCoreState, reduceNotification, type CoreState } from './events';
 import { pinnedLabels, seenMarkUnread, seenRaise } from './labels';
 import { parseLayout, type CoreLayout } from './layout';
-import { parseDocGet, parseSubscribe, parseTerminal, safeUint, CoreCommandError, type CoreTerminal } from './types';
+import { parseDocGet, parseSubscribe, safeUint, CoreCommandError, type CoreTerminal } from './types';
 import type { ByteTransport } from './transport';
 
 /**
@@ -211,7 +211,7 @@ export class CoreSession {
       this.scheduleDocRead();
       this.maybeMarkSeen();
     }
-    if (r.docs.length) this.scheduleDocRead();
+    if (r.docs.some((d) => d.name === 'herdr-app' && d.version !== this.layoutVersion)) this.scheduleDocRead();
     // "Decide on the turn event": status/labels/size/foreground changes must
     // not overrule a mark-unread from another client while this screen stays
     // visible. A later turn is the genuine viewing transition that may raise it.
@@ -290,19 +290,9 @@ export class CoreSession {
   private async label(address: string, labels: Record<string, string>): Promise<void> {
     const client = this.client;
     if (!client) throw new CoreCommandError('not_connected', 'Herdr Core is not connected');
-    const raw = await client.request('terminal.label', { terminal: address, labels }, 10_000);
+    await client.request('terminal.label', { terminal: address, labels }, 10_000);
     if (client !== this.client) return;
-    const terminal = parseTerminal(raw);
     this.clearError('label');
-    this.replaceTerminal(terminal);
-  }
-
-  private replaceTerminal(t: CoreTerminal): void {
-    if (!this.state.terminals.has(t.address)) return;
-    const terminals = new Map(this.state.terminals);
-    terminals.set(t.address, t);
-    this.state = { ...this.state, terminals };
-    this.emit();
   }
 
   async sendKeys(address: string, keys: string[]): Promise<void> {

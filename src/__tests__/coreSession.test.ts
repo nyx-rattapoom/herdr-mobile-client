@@ -61,9 +61,15 @@ describe('CoreSession events and documents', () => {
     t.push(encodeFrame(2, FRAME.DATA, bytes.subarray(20)));
     expect(session.snapshot().state.terminals.get('t7')?.status?.state).toBe('working');
 
+    // Another document, or the version already read, needs no re-read.
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 12, type: 'doc', data: { name: 'notes', version: 7 } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 13, type: 'doc', data: { name: 'herdr-app', version: 1 } } });
+    await flush();
+    expect(core.docReads).toBe(1);
+
     core.doc = { spaces: [] };
     core.docVersion = 2;
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 12, type: 'doc', data: { name: 'herdr-app', version: 2 } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 14, type: 'doc', data: { name: 'herdr-app', version: 2 } } });
     await flush();
     expect(core.docReads).toBe(2);
     expect(session.snapshot().layoutVersion).toBe(2);
@@ -152,15 +158,15 @@ describe('CoreSession shared state and input', () => {
     expect(core.labelWrites).toHaveLength(1);
     // Another client marks it unread while the screen stays visible; unrelated
     // updates must not overrule that lower write.
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 11, type: 'labels', terminal: 't7', data: { labels: { 'herdr.seen': '0' } } } });
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 12, type: 'size', terminal: 't7', data: { cols: 100, rows: 30 } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 21, type: 'labels', terminal: 't7', data: { labels: { 'herdr.seen': '0' } } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 22, type: 'size', terminal: 't7', data: { cols: 100, rows: 30 } } });
     await flush();
     expect(core.labelWrites).toHaveLength(1);
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 13, type: 'turn', terminal: 't7', data: { turn: 2, state: 'done' } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 23, type: 'turn', terminal: 't7', data: { turn: 2, state: 'done' } } });
     await flush();
     expect(core.labelWrites[1]).toEqual({ 'herdr.seen': '2' });
     session.setVisible(null);
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 14, type: 'turn', terminal: 't7', data: { turn: 3, state: 'done' } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 30, type: 'turn', terminal: 't7', data: { turn: 3, state: 'done' } } });
     await flush();
     expect(core.labelWrites).toHaveLength(2);
     // Re-viewing is a genuine later transition and may raise it again.
@@ -182,6 +188,28 @@ describe('CoreSession shared state and input', () => {
     expect(core.labelWrites[1]).toEqual({ 'herdr.pinned': '' });
     await session.markUnread('t7');
     expect(core.labelWrites[2]).toEqual({ 'herdr.seen': '4' });
+    session.close();
+  });
+
+  it('applies label writes through the ordered event stream, never from the reply record', async () => {
+    const { t, core, session } = await setup();
+    const reply = t.onWrite;
+    t.onWrite = (bytes) => {
+      // A newer event reaches the phone before the label reply.
+      if (decodeUtf8(bytes).includes('"terminal.label"')) {
+        core.event({
+          jsonrpc: '2.0',
+          method: 'event',
+          params: { seq: 11, type: 'status', terminal: 't7', data: { status: { state: 'working' }, records: {}, reported: true } },
+        });
+      }
+      reply(bytes);
+    };
+    await session.setPinned('t7', true);
+    const t7 = session.snapshot().state.terminals.get('t7');
+    expect(t7?.status?.state).toBe('working');
+    expect(t7?.labels['herdr.pinned']).toBe('1');
+    expect(session.snapshot().state.seq).toBe(12);
     session.close();
   });
 
