@@ -94,6 +94,9 @@ screenshot 05. `logcat` showed no app crash during the flow.
 - Type text / first-input active-viewer reattach on the attach channel: typing in the
   terminal should reattach with `observe:false` and send DATA and RESIZE frames on the
   attach channel. Screenshot 08 still shows the observe banner.
+- Shared labels: the `herdr.seen` raise on view and the pin/unpin `herdr.pinned` round-trip
+  were not verified on the device. t7 still shows "done" in 09 after being viewed in
+  07–08, and the fake `hc` may not emit the `labels` events the app waits for.
 - Real herdr-core: repeat 06–08 against a live `hc` and inject a server event to exercise
   subscribe/`missed`/resnapshot on-device.
 - The fake `hc` peer is a good candidate for `test/server/` so the next Core lane does

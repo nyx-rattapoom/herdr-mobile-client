@@ -473,9 +473,9 @@ saved Core profile on iOS is gated before any native call.
   prompt-submit round-trip (`terminal.send`), hardware Back). Screenshots and the fake-`hc` caveat are in
   [EMULATOR-EVIDENCE.md](EMULATOR-EVIDENCE.md). The JVM unit tests were not run on that host.
 - Not run, and not claimed: a real `hc connect`/desktop event exchange (the emulator server was a protocol-faithful
-  fake); first-input active-viewer reattach with typed input on the attach channel; iOS platform-gate device
-  screenshots; iOS Core transport (follow-up). The source tests use an independent
-  in-process wire peer and pinned schema shapes, not a live core.
+  fake); first-input active-viewer reattach with typed input on the attach channel; on-device `herdr.seen` /
+  `herdr.pinned` label sync; iOS platform-gate device screenshots; iOS Core transport (follow-up). The source
+  tests use an independent in-process wire peer and pinned schema shapes, not a live core.
 
 **Known limits**
 
