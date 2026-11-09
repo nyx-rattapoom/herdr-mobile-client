@@ -239,6 +239,36 @@ describe('CoreSession shared state and input', () => {
     session.close();
   });
 
+  it('keeps an event rejected while the document read is in flight across start and reconnect', async () => {
+    const rejectDuringDocRead = (t: FakeByteTransport, core: TestCore) => {
+      const reply = t.onWrite;
+      t.onWrite = (bytes) => {
+        if (decodeUtf8(bytes).includes('"doc.get"')) {
+          core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 11, type: 'turn', terminal: 't7', data: { turn: Number.MAX_SAFE_INTEGER + 1 } } });
+        }
+        reply?.(bytes);
+      };
+    };
+    const first = new FakeByteTransport();
+    const firstCore = new TestCore(first);
+    const second = new FakeByteTransport();
+    const secondCore = new TestCore(second);
+    rejectDuringDocRead(first, firstCore);
+    rejectDuringDocRead(second, secondCore);
+    const transports = [first, second];
+    const session = new CoreSession(async () => transports.shift() as FakeByteTransport);
+
+    await session.start();
+    expect(firstCore.docReads).toBe(1);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: expect.stringMatching(/safe unsigned integer/) });
+    expect(session.snapshot().state.seq).toBe(10);
+
+    await session.reconnect();
+    expect(secondCore.docReads).toBe(1);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: expect.stringMatching(/safe unsigned integer/) });
+    session.close();
+  });
+
   it('keeps a rejected snapshot visible until an authoritative resnapshot replaces state', async () => {
     const { t, core, session } = await setup();
     core.event({

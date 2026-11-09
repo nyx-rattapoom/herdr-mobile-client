@@ -127,7 +127,7 @@ export class CoreSession {
     await this.subscribeAndRead(gen, client);
     if (gen !== this.generation) return;
     this.status = 'live';
-    this.resetError();
+    this.error = null;
     this.emit();
     this.maybeMarkSeen();
     await this.reattachPanes(gen);
@@ -363,6 +363,7 @@ export class CoreSession {
   async reconnect(): Promise<void> {
     if (this.status === 'reconnecting') return;
     this.status = 'reconnecting';
+    this.resetError();
     this.emit();
     const gen = ++this.generation;
     this.client?.close();
