@@ -211,6 +211,8 @@ export class CoreSession {
       this.scheduleDocRead();
       this.maybeMarkSeen();
     }
+    // readDoc only reads the local herdr-app; mirrored-machine stamps and
+    // re-announced versions would just re-fetch the same layout over SSH.
     if (r.docs.some((d) => d.name === 'herdr-app' && d.machine === null && d.version !== this.layoutVersion)) this.scheduleDocRead();
     // "Decide on the turn event": status/labels/size/foreground changes must
     // not overrule a mark-unread from another client while this screen stays
@@ -290,6 +292,8 @@ export class CoreSession {
   private async label(address: string, labels: Record<string, string>): Promise<void> {
     const client = this.client;
     if (!client) throw new CoreCommandError('not_connected', 'Herdr Core is not connected');
+    // The reply record is not seq-stamped and can arrive after newer events,
+    // so it is ignored; the core's `labels` event carries the change in order.
     await client.request('terminal.label', { terminal: address, labels }, 10_000);
     if (client !== this.client) return;
     this.clearError('label');

@@ -437,7 +437,7 @@ saved Core profile on iOS is gated before any native call.
   hello (generation/framed/required methods), switches modes safely when the reply and first frame share a chunk,
   handles request timeouts, bounded early frames and exact consumed-byte CREDIT (viewer input has no core-granted
   credit and is written immediately; `NativeCoreTransport` serializes writes so frames keep call order). `CoreSession`
-  subscribes before reading documents, resnapshots on `missed`, refreshes the read-only `herdr-app` layout on doc
+  subscribes before reading documents, resnapshots on `missed`, refreshes the read-only `herdr-app` layout on local doc
   events/reconnect, raises `herdr.seen` once per turn, writes pin/unpin labels, and guards stale callbacks with a
   generation token. `CorePane` starts in observe mode, reattaches as active on first input, and detaches with CLOSE
   (never kills the terminal).

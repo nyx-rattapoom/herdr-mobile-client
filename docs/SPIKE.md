@@ -194,10 +194,14 @@ Date: 2026-11-09. Sources pinned at herdr-core `3ba03e6fc59fb974a4e2627586646f87
 - **Events.** `events.subscribe` returns `{seq, terminals, channel}` and notifications arrive as JSON lines:
   `event` (`created`, `restarted`, `lost`, `finished`, `removed`, `keep`, `status`, `turn`, `title`, `labels`,
   `size`, `foreground`, `doc`), `heartbeat {seq}`, and `missed {seq, terminals}`. The client resnapshots on
-  `missed`/reconnect and reads documents after subscribe, `missed`, docs events and reconnects.
+  `missed`/reconnect and reads the local `herdr-app` document after subscribe, `missed` and reconnects, and on a
+  `doc` event only when it names the local (`machine` null) `herdr-app` with a version other than the one held;
+  mirrored-machine and other-document stamps are ignored.
 - **Shared state.** `herdr.seen=<turn>` is raise-only; a missing label is not turn 0: the client applies its own
   rule (this app shows any finished turn, `turn > 0`, as done) and keeps no separate local seen counter.
-  Unpin writes `herdr.pinned=""`; pin writes `herdr.pinned=1`. No bulk upload of local pins happens.
+  Unpin writes `herdr.pinned=""`; pin writes `herdr.pinned=1`. No bulk upload of local pins happens. The
+  `terminal.label` reply record is not applied: it is not seq-stamped, so state changes only through the
+  seq-ordered `labels` event the core emits for each write.
 - **Layout.** The `herdr-app` document is read only (`doc.get`): spaces → tabs → nodes (block/row/column/stack,
   optional floating blocks). Unknown content is ignored and never written back.
 - **iOS.** Core transport is deliberately absent in this delivery. The Swift module keeps its existing Herdr TUI
