@@ -452,7 +452,7 @@ saved Core profile on iOS is gated before any native call.
 - iOS: no native Core transport. `src/core/platform.ts` gates Core before any `openExecStream` call and the server
   form explains the Android-only status; legacy iOS behavior is unchanged.
 
-**Verification (host has no JDK/Android SDK and no disposable real `hc` fixture)**
+**Verification (host has no disposable real `hc` fixture; the Android emulator lane was later provisioned separately)**
 
 - `npm test -- --runInBand`: all suites pass; review rounds keep adding tests, so the pipeline's test step is the
   current count (baseline before this work: 33 suites / 249 tests).
@@ -468,9 +468,13 @@ saved Core profile on iOS is gated before any native call.
   created/status/turn/title/foreground/size/labels/lost/finished/removed/missed/doc, stale seq, unsafe integers),
   `coreLabels`, `coreLayout`, `coreTerminalBuffer`, `servers` backend regressions, and `serverForm` iOS/Android
   selector behavior.
-- Not run, and not claimed: Android JVM/native compile or device round-trip; a real `hc connect`/desktop event
-  exchange; an Android emulator UI run; iOS platform-gate device screenshots; iOS Core transport (follow-up). The
-  tests above use an independent in-process wire peer and pinned schema shapes, not a live core.
+- Android device evidence: `npx expo run:android` built and installed version 1.2.0 (versionCode 10) on an API 36
+  x86_64 emulator and drove the full Core flow (profile selection, host-key pin, native exec stream, list, terminal,
+  typed round-trip, hardware Back). Screenshots and the fake-`hc` caveat are in
+  [EMULATOR-EVIDENCE.md](EMULATOR-EVIDENCE.md). The JVM unit tests were not run on that host.
+- Not run, and not claimed: a real `hc connect`/desktop event exchange (the emulator server was a protocol-faithful
+  fake); iOS platform-gate device screenshots; iOS Core transport (follow-up). The source tests use an independent
+  in-process wire peer and pinned schema shapes, not a live core.
 
 **Known limits**
 
