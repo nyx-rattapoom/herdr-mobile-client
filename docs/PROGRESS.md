@@ -436,7 +436,7 @@ saved Core profile on iOS is gated before any native call.
   `events`, `layout`, `labels`, `terminalBuffer`, `platform`, `CorePane`, `CoreSession`). `CoreClient` validates the
   hello (generation/framed/required methods), switches modes safely when the reply and first frame share a chunk,
   handles request timeouts, bounded early frames and exact consumed-byte CREDIT (viewer input has no core-granted
-  credit and is written immediately). `CoreSession`
+  credit and is written immediately; `NativeCoreTransport` serializes writes so frames keep call order). `CoreSession`
   subscribes before reading documents, resnapshots on `missed`, refreshes the read-only `herdr-app` layout on doc
   events/reconnect, raises `herdr.seen` once per turn, writes pin/unpin labels, and guards stale callbacks with a
   generation token. `CorePane` starts in observe mode, reattaches as active on first input, and detaches with CLOSE
@@ -444,6 +444,7 @@ saved Core profile on iOS is gated before any native call.
 - `src/core/terminalBuffer.ts`: bounded (10,000-line history) incremental VT screen for raw attach bytes, reusing
   `Line`/`Style`/`cellWidth`/`layoutLine`/`TermRow`. It covers CR/LF/backspace/tab, wrapping, cursor save/restore and
   movement, erase, scroll regions, insert/delete, SGR 16/256/RGB, alt screen, split CSI/OSC and split UTF-8.
+  CSI repeat/insert/delete/scroll/tab counts are clamped to the screen size.
 - `src/screens/CoreConsoleScreen.tsx` and `App.tsx`: Core route, desktop layout grouping plus unplaced/finished
   terminals, pinned/needs-you/done ordering, shared pin/mark-unread actions, streamed terminal view, special keys,
   raw typing and prompt submit (blocked prompts refused without `force`). Reconnect reopens the SSH route with the
@@ -457,7 +458,8 @@ saved Core profile on iOS is gated before any native call.
   current count (baseline before this work: 33 suites / 249 tests).
 - `npm run typecheck`: pass. `npm run lint`: 0 errors; the only warning is the pre-existing
   `require()` warning in `sheet.test.tsx`.
-- New source-level tests: `coreFrames` (bytes, frames, limits, hc command/error mapping, platform gate),
+- New source-level tests: `coreFrames` (bytes, frames, limits, hc command/error mapping), `coreTransport` (iOS
+  platform gate before any native call, listeners before `startExecStream`, in-order native writes),
   `coreClient` (split/coalesced hello, incompatible hello, banner stdout, missing hc, out-of-order requests,
   timeouts, early frames, exact credit, CLOSE detach, malformed frames), `coreSession` (subscribe → doc order,
   split event lines, doc/missed refresh, reconnect generation guard, seen raise-once, pin/unpin, mark-unread,
