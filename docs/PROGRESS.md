@@ -414,3 +414,74 @@ password field before leaving, so iOS no longer offers to save server passwords 
 - **Known iOS limits:** no background monitoring beyond the ~30 s grace period iOS grants (no foreground
   service; agent alerts need the app open). Apps can't block screenshots (only the app-switcher snapshot is
   covered). Dead peers behind a jump host are detected by the app's `alive()` check, not by SSH keepalive.
+
+## Selectable Herdr Core backend (2026-11-09, Android first)
+
+Branch `fm/herdr-core-backend`. Existing profiles and new profiles stay **Herdr TUI**; Core is a per-profile
+explicit choice. Nothing silently falls back: a Core profile that cannot connect shows a Core-specific error, and a
+saved Core profile on iOS is gated before any native call.
+
+**Implemented**
+
+- `src/store/servers.ts`: additive optional `backend?: 'legacy' | 'core'` and independent `hcPath?: string`.
+  Missing/unknown stored backend loads as legacy; unknown input is a validation error. Switching backends keeps
+  both `herdrPath` and `hcPath` and never clones or moves the saved password. `ServerFormScreen` shows the selector
+  and the `hc` field; `ServersScreen` labels each row.
+- `modules/herdr-ssh` (Android): `ExecStream.kt` is a long-lived no-PTY `ChannelExec` with bounded stdout
+  (16 MiB pending; a consumer that falls further behind closes the stream with `output queue overflow`, there is no
+  SSH-window backpressure), capped stderr (64 KiB), a start gate so early stdout is not lost, an EOF sentinel that
+  lets queued bytes drain before `onChannelClosed`, and a close that wakes and ends the worker tasks. New events are separate from the legacy
+  text events: `onChannelBytes` (base64 envelope only) and `onChannelClosed`.
+- `src/core/`: independent protocol and state (`bytes`, `frames`, `types`, `commands`, `transport`, `client`,
+  `events`, `layout`, `labels`, `terminalBuffer`, `platform`, `CorePane`, `CoreSession`). `CoreClient` validates the
+  hello (generation/framed/required methods), switches modes safely when the reply and first frame share a chunk,
+  handles request timeouts, bounded early frames and exact consumed-byte CREDIT (viewer input has no core-granted
+  credit and is written immediately; `NativeCoreTransport` serializes writes so frames keep call order). `CoreSession`
+  subscribes before reading documents, resnapshots on `missed`, refreshes the read-only `herdr-app` layout on local doc
+  events/reconnect, raises `herdr.seen` once per turn, writes pin/unpin labels, and guards stale callbacks with a
+  generation token. `CorePane` starts in observe mode, reattaches as active on first input, and detaches with CLOSE
+  (never kills the terminal).
+- `src/core/terminalBuffer.ts`: bounded (10,000-line history) incremental VT screen for raw attach bytes, reusing
+  `Line`/`Style`/`cellWidth`/`layoutLine`/`TermRow`. It covers CR/LF/backspace/tab, wrapping, cursor save/restore and
+  movement, erase, scroll regions, insert/delete, SGR 16/256/RGB, alt screen, split CSI/OSC and split UTF-8.
+  CSI repeat/insert/delete/scroll/tab counts are clamped to the screen size.
+- `src/screens/CoreConsoleScreen.tsx` and `App.tsx`: Core route, desktop layout grouping plus unplaced/finished
+  terminals, pinned/needs-you/done ordering, shared pin/mark-unread actions, streamed terminal view, special keys,
+  raw typing and prompt submit (blocked prompts refused without `force`). Reconnect reopens the SSH route with the
+  saved pin/credentials before a new `hc connect`.
+- iOS: no native Core transport. `src/core/platform.ts` gates Core before any `openExecStream` call and the server
+  form explains the Android-only status; legacy iOS behavior is unchanged.
+
+**Verification (host has no disposable real `hc` fixture; the Android emulator lane was later provisioned separately)**
+
+- `npm test -- --runInBand`: all suites pass; review rounds keep adding tests, so the pipeline's test step is the
+  current count (baseline before this work: 33 suites / 249 tests).
+- `npm run typecheck`: pass. `npm run lint`: 0 errors; the only warning is the pre-existing
+  `require()` warning in `sheet.test.tsx`.
+- New source-level tests: `coreFrames` (bytes, frames, limits, hc command/error mapping), `coreTransport` (iOS
+  platform gate before any native call, listeners before `startExecStream`, in-order native writes),
+  `coreClient` (split/coalesced hello, incompatible hello, banner stdout, missing hc, out-of-order requests,
+  timeouts, early frames, exact credit, CLOSE detach, malformed frames), `coreSession` (subscribe → doc order,
+  split event lines, doc/missed refresh, reconnect generation guard, seen raise-once, pin/unpin, mark-unread,
+  blocked submit), `corePane` (observe attach, first paint, claim-input reattach, RESIZE/FOCUS/AUTOMATIC_INPUT,
+  detach without kill, reconnect reattach, finished terminal detach), `coreEvents` (producer-shaped payloads for
+  created/status/turn/title/foreground/size/labels/lost/finished/removed/missed/doc, stale seq, unsafe integers),
+  `coreLabels`, `coreLayout`, `coreTerminalBuffer`, `servers` backend regressions, and `serverForm` iOS/Android
+  selector behavior.
+- Android device evidence: `npx expo run:android` built and installed version 1.2.0 (versionCode 10) on an API 36
+  x86_64 emulator and drove the Core flow (profile selection, host-key pin, native exec stream, list, terminal,
+  prompt-submit round-trip (`terminal.send`), hardware Back). Screenshots and the fake-`hc` caveat are in
+  [EMULATOR-EVIDENCE.md](EMULATOR-EVIDENCE.md). The JVM unit tests were not run on that host.
+- Not run, and not claimed: a real `hc connect`/desktop event exchange (the emulator server was a protocol-faithful
+  fake); first-input active-viewer reattach with typed input on the attach channel; on-device `herdr.seen` /
+  `herdr.pinned` label sync; iOS platform-gate device screenshots; iOS Core transport (follow-up). The source
+  tests use an independent in-process wire peer and pinned schema shapes, not a live core.
+
+**Known limits**
+
+- Core attach is Android-only in this delivery; iOS keeps the legacy TUI path.
+- Core v1 layout is read-only: no `doc.set`, no desktop focus/layout RPC, no terminal creation/close from the phone.
+- The VT buffer crops/pads on resize instead of reflowing text. Combining marks and wide cells are handled; ZWJ
+  emoji clusters are not grapheme-clustered. Mouse, image protocols, IME parity and full win32-keyboard parity are
+  not promised.
+- No real full-screen Core agent fixture was available, so desktop fidelity for those screens is unverified.

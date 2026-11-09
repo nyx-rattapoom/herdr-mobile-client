@@ -29,6 +29,9 @@ import { Composer } from './src/screens/Composer';
 import { ServerFormScreen } from './src/screens/ServerFormScreen';
 import { SessionsScreen, type SessionEntry, type TreeTarget } from './src/screens/SessionsScreen';
 import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
+import { CoreConsoleScreen } from './src/screens/CoreConsoleScreen';
+import { CoreSession, type CoreSessionSnapshot } from './src/core/CoreSession';
+import { CORE_PLATFORM_MESSAGE, corePlatformAvailable } from './src/core/platform';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SetupCard, type SetupState } from './src/screens/SetupCard';
 import { ServersScreen } from './src/screens/ServersScreen';
@@ -36,7 +39,7 @@ import { Busy, MODAL_SWAP_MS, colors } from './src/screens/ui';
 import type { DiscoveryResult } from './src/protocol/sessions';
 import { ServerConnection, describeSshError, isRetryableSshError, probeHostKey, type JumpHost } from './src/ssh/connection';
 import { decidePin, pinHost, type ForgottenPin, type HostKeyPin, type PinDecision } from './src/ssh/pinning';
-import { dependentsOf, endpointInUse, jumpChain, jumpOptions, routeLabel, type ServerProfile } from './src/store/servers';
+import { dependentsOf, endpointInUse, isCoreProfile, jumpChain, jumpOptions, routeLabel, type ServerProfile } from './src/store/servers';
 import { AuditLog, type AuditEntry } from './src/store/audit';
 import { PaneFlags, formatUntil, nextClockTime, snoozePresets } from './src/store/paneFlags';
 import { ViewedStore } from './src/store/viewed';
@@ -81,7 +84,8 @@ type Route =
       previous: ForgottenPin | null;
     }
   | { name: 'sessions'; server: ServerProfile; entries: SessionEntry[]; herdrFound: boolean; setup?: SetupState }
-  | { name: 'workspace'; parent: SessionsRoute; live: LiveSession; session: string; sel: Selection };
+  | { name: 'workspace'; parent: SessionsRoute; live: LiveSession; session: string; sel: Selection }
+  | { name: 'core'; server: ServerProfile; core: CoreSession };
 
 type SessionsRoute = Extract<Route, { name: 'sessions' }>;
 
@@ -120,6 +124,9 @@ export default function App() {
   const [snoozing, setSnoozing] = useState<{ live: LiveSession; paneId: string; custom?: boolean } | null>(null);
   const conn = useRef<ServerConnection | null>(null);
   const lives = useRef<LiveSession[]>([]);
+  const coreSession = useRef<CoreSession | null>(null);
+  const coreSub = useRef<(() => void) | null>(null);
+  const [coreSnap, setCoreSnap] = useState<CoreSessionSnapshot | null>(null);
   const reconnector = useRef<Reconnector | null>(null);
   const [reconnect, setReconnect] = useState<ReconnectState>({ kind: 'idle' });
   const biometricRef = useRef(account.settings.biometric);
@@ -168,6 +175,14 @@ export default function App() {
     void setupNotifications();
   }, []);
 
+  const stopCore = useCallback(() => {
+    coreSub.current?.();
+    coreSub.current = null;
+    coreSession.current?.close();
+    coreSession.current = null;
+    setCoreSnap(null);
+  }, []);
+
   const home = useCallback(() => {
     attempt.current++;
     lives.current.forEach((l) => {
@@ -181,9 +196,10 @@ export default function App() {
     lives.current = [];
     conn.current?.close();
     conn.current = null;
+    stopCore();
     stopBackgroundMonitoring();
     setRoute({ name: 'servers' });
-  }, []);
+  }, [stopCore]);
 
   const serverOf = (live: LiveSession): ServerProfile | null => {
     const r = routeRef.current;
@@ -366,6 +382,63 @@ export default function App() {
     return result;
   }, []);
 
+  const connectCore = useCallback(
+    async (server: ServerProfile, c: ServerConnection, id: number) => {
+      if (!corePlatformAvailable()) {
+        throw new Error(CORE_PLATFORM_MESSAGE);
+      }
+      stopCore();
+      let active = c;
+      let first = true;
+      // CoreSession may reconnect after an SSH drop: reopen the route with the
+      // same pinned host key and credentials instead of reusing a dead session.
+      const openTransport = async () => {
+        if (!first) {
+          const pin = await pins.get(pinHost(server), server.port);
+          if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
+          if (coreSession.current !== core) throw new Cancelled();
+          if (conn.current === active) conn.current = null;
+          active.close();
+          const next = await ServerConnection.open(
+            { ...server, ...(await credentialsFor(server)) },
+            pin,
+            await jumpFor(server),
+          );
+          if (coreSession.current !== core) {
+            next.close();
+            throw new Cancelled();
+          }
+          active = next;
+          conn.current = next;
+        }
+        first = false;
+        return active.openCore(server.hcPath);
+      };
+      const core = new CoreSession(openTransport);
+      coreSession.current = core;
+      coreSub.current = core.subscribe(setCoreSnap);
+      setCoreSnap(core.snapshot());
+      await step(
+        id,
+        3,
+        async () => {
+          await core.start();
+          return core.currentHello;
+        },
+        (hello) => (hello ? `hc ${hello.version}` : undefined),
+      );
+      if (id !== attempt.current) {
+        core.close();
+        throw new Cancelled();
+      }
+      const next: Route = { name: 'core', server, core };
+      setRoute(next);
+      routeRef.current = next;
+      startBackgroundMonitoring(`Watching Herdr Core on ${server.label}`);
+    },
+    [step, stopCore, pins, credentialsFor, jumpFor],
+  );
+
   const connectPinned = useCallback(
     async (server: ServerProfile, pin: HostKeyPin, id: number) => {
       const c = await step(id, 2, async () => {
@@ -377,6 +450,10 @@ export default function App() {
         throw new Cancelled();
       }
       conn.current = c;
+      if (isCoreProfile(server)) {
+        await connectCore(server, c, id);
+        return;
+      }
       superviseConnection(server);
       await step(id, 3, () => c.herdrVersion(server.herdrPath), (v) => (v ? `herdr ${v}` : 'not installed'));
       const route = await step(
@@ -395,7 +472,7 @@ export default function App() {
       }
       showSessions(route);
     },
-    [credentialsFor, jumpFor, startSessions, showSessions, step, superviseConnection],
+    [credentialsFor, jumpFor, startSessions, showSessions, step, superviseConnection, connectCore],
   );
 
   const runSetup = useCallback(
@@ -429,9 +506,10 @@ export default function App() {
     lives.current = [];
     conn.current?.close();
     conn.current = null;
+    stopCore();
     setError(describeSshError(e));
     setRoute({ name: 'servers' });
-  }, []);
+  }, [stopCore]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
@@ -495,6 +573,13 @@ export default function App() {
   const open = useCallback(
     async (server: ServerProfile) => {
       setError(null);
+      // Gate before any native call: a saved Core profile on iOS must never
+      // reach the Android-only stream API or silently become legacy.
+      if (isCoreProfile(server) && !corePlatformAvailable()) {
+        setError(CORE_PLATFORM_MESSAGE);
+        setRoute({ name: 'servers' });
+        return;
+      }
       const id = ++attempt.current;
       const via = routeLabel(list, server);
       const target = `${server.username}@${server.host}:${server.port}${via ? ` via ${via}` : ''}`;
@@ -766,6 +851,21 @@ export default function App() {
         />
       );
       break;
+    case 'core': {
+      const r = route;
+      screen = coreSnap ? (
+        <CoreConsoleScreen
+          server={r.server}
+          session={r.core}
+          snapshot={coreSnap}
+          onBack={home}
+          onReconnect={() => void r.core.reconnect()}
+        />
+      ) : (
+        <Busy label="Connecting to Herdr Core…" />
+      );
+      break;
+    }
     case 'workspace': {
       const r = route;
       const agentOf = (paneId: string) => r.live.getState().agents.get(paneId);

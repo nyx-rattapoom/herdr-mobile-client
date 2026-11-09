@@ -3,6 +3,9 @@ import { endpointId, pinHost, type KeyValueStore } from '../ssh/pinning';
 
 export type AuthMethod = 'key' | 'password';
 
+/** Which server protocol a profile speaks. Missing means the original Herdr TUI. */
+export type BackendKind = 'legacy' | 'core';
+
 export type ServerProfile = {
   id: string;
   label: string;
@@ -11,6 +14,10 @@ export type ServerProfile = {
   username: string;
   auth?: AuthMethod;
   herdrPath?: string;
+  /** Additive: absent on every profile saved before Herdr Core existed. */
+  backend?: BackendKind;
+  /** Independent executable for `hc connect`; never replaces herdrPath. */
+  hcPath?: string;
   jumpId?: string;
 };
 
@@ -25,8 +32,23 @@ export type ServerInput = {
   auth?: AuthMethod;
   password: string;
   herdrPath?: string;
+  backend?: BackendKind;
+  hcPath?: string;
   jumpId?: string;
 };
+
+const BACKENDS: readonly BackendKind[] = ['legacy', 'core'];
+
+/** Unknown or missing stored data is legacy; only an explicit `core` selects Core. */
+export const backendOf = (s: Pick<ServerProfile, 'backend'>): BackendKind =>
+  s.backend === 'core' ? 'core' : 'legacy';
+
+export const isCoreProfile = (s: Pick<ServerProfile, 'backend'>): boolean => backendOf(s) === 'core';
+
+export function validateBackend(value: unknown): string | null {
+  if (value === undefined) return null;
+  return BACKENDS.includes(value as BackendKind) ? null : 'Backend must be Herdr TUI or Herdr Core';
+}
 
 type PinTarget = { host: string; port: number; jumpId?: string };
 
@@ -126,8 +148,12 @@ export function validateServer(input: ServerInput, opts: { hasSavedPassword?: bo
   if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) return 'Port must be 1–65535';
   if (!input.username.trim()) return 'User is required';
   if (authOf(input) === 'password' && !input.password && !opts.hasSavedPassword) return 'Password is required';
+  const backendErr = validateBackend(input.backend);
+  if (backendErr) return backendErr;
   const herdrErr = validateHerdrPath(input.herdrPath ?? '');
   if (herdrErr) return `Herdr path: ${herdrErr}`;
+  const hcErr = validateHerdrPath(input.hcPath ?? '');
+  if (hcErr) return `hc path: ${hcErr}`;
   return null;
 }
 
@@ -188,6 +214,10 @@ export class ServerStore {
     const host = input.host.trim();
     const username = input.username.trim();
     const herdrPath = input.herdrPath?.trim() || undefined;
+    // Keep both executable paths independently: switching backend must neither
+    // repurpose nor discard the other one.
+    const hcPath = input.hcPath?.trim() || undefined;
+    const backend = input.backend === 'core' ? 'core' : undefined;
     const jumpId = input.jumpId || undefined;
     return {
       id,
@@ -197,6 +227,8 @@ export class ServerStore {
       username,
       auth: authOf(input),
       ...(herdrPath ? { herdrPath } : {}),
+      ...(backend ? { backend } : {}),
+      ...(hcPath ? { hcPath } : {}),
       ...(jumpId ? { jumpId } : {}),
     };
   }
