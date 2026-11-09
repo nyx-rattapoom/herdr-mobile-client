@@ -469,11 +469,12 @@ saved Core profile on iOS is gated before any native call.
   `coreLabels`, `coreLayout`, `coreTerminalBuffer`, `servers` backend regressions, and `serverForm` iOS/Android
   selector behavior.
 - Android device evidence: `npx expo run:android` built and installed version 1.2.0 (versionCode 10) on an API 36
-  x86_64 emulator and drove the full Core flow (profile selection, host-key pin, native exec stream, list, terminal,
-  typed round-trip, hardware Back). Screenshots and the fake-`hc` caveat are in
+  x86_64 emulator and drove the Core flow (profile selection, host-key pin, native exec stream, list, terminal,
+  prompt-submit round-trip (`terminal.send`), hardware Back). Screenshots and the fake-`hc` caveat are in
   [EMULATOR-EVIDENCE.md](EMULATOR-EVIDENCE.md). The JVM unit tests were not run on that host.
 - Not run, and not claimed: a real `hc connect`/desktop event exchange (the emulator server was a protocol-faithful
-  fake); iOS platform-gate device screenshots; iOS Core transport (follow-up). The source tests use an independent
+  fake); first-input active-viewer reattach with typed input on the attach channel; iOS platform-gate device
+  screenshots; iOS Core transport (follow-up). The source tests use an independent
   in-process wire peer and pinned schema shapes, not a live core.
 
 **Known limits**

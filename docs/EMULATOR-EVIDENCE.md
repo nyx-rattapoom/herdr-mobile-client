@@ -6,12 +6,13 @@ available). All 10 screenshots are in [`docs/emulator-evidence/`](emulator-evide
 
 ## Verdict
 
-The full Core flow ran on a real Android emulator: add a Core profile, verify and pin the
+The Core flow ran on a real Android emulator: add a Core profile, verify and pin the
 host key, connect over the native Android `hc connect` exec stream, render the terminal
-list and desktop layout, open a terminal, type/submit, and leave with the hardware Back
-button.
+list and desktop layout, open a terminal, submit a prompt (`terminal.send`), and leave
+with the hardware Back button. The pane stayed in observe mode throughout; typed input on
+the attach channel was not exercised.
 
-This closes **two** of the three untested Android gaps recorded in `PROGRESS.md`:
+It closes two recorded gaps:
 
 - hardware Back inside the Core terminal (`CoreConsoleScreen` BackHandler): screenshots
   09 and 10;
@@ -19,7 +20,7 @@ This closes **two** of the three untested Android gaps recorded in `PROGRESS.md`
   Core screen (06–08) only renders if framed binary traffic crossed it intact in both
   directions.
 
-It does **not** close the other two gaps:
+These gaps stay open:
 
 - **iOS Core gate** remains untested. This host has no full Xcode/iOS simulator lane; the
   gate is still only covered by the platform-mocked tests.
@@ -49,8 +50,7 @@ The server was a disposable `herdr-test` container on `127.0.0.1:2222` with a Py
 generation-1 shapes used by the app: plain `hello`, framed channel 0 requests, event
 channel 2, attach channel 5, the `herdr-app` layout, `terminal.attach` first paint,
 `terminal.send`/`keys`/`label`. It is **not** herdr-core and does not prove live-core
-interoperability. The full fake source is in the task report at
-`/Users/nyx/firstmate/data/android-emulator-screenshot-evidence-for-bc/report.md` §6.
+interoperability. The fake's source is not included in this repository.
 
 The app found the fake through its normal `$HOME/.local/bin/hc` fallback; the profile's
 hc path field stayed at its placeholder. The SSH route, host-key probe/pin, password
@@ -61,7 +61,7 @@ auth, native exec channel, base64 bridge envelope and raw VT bytes were all real
 The host started without a JDK, Android SDK or emulator. The run used home-directory
 installs, not shared system paths:
 
-- Temurin JDK 17.0.21+9 → `/Users/nyx/android-lab/jdk`
+- Temurin JDK 17.0.21+9 → `~/android-lab/jdk`
 - Android SDK command-line tools → `~/Library/Android/sdk`; `platform-tools`,
   `platforms;android-36`, `build-tools;36.0.0`, `emulator`,
   `system-images;android-36;default;x86_64`
@@ -91,6 +91,9 @@ screenshot 05. `logcat` showed no app crash during the flow.
 ## Remaining gaps
 
 - iOS Core gate: run on an Apple-silicon/Mac lane with an iOS simulator.
+- Type text / first-input active-viewer reattach on the attach channel: typing in the
+  terminal should reattach with `observe:false` and send DATA and RESIZE frames on the
+  attach channel. Screenshot 08 still shows the observe banner.
 - Real herdr-core: repeat 06–08 against a live `hc` and inject a server event to exercise
   subscribe/`missed`/resnapshot on-device.
 - The fake `hc` peer is a good candidate for `test/server/` so the next Core lane does
