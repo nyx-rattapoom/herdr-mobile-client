@@ -211,7 +211,7 @@ export class CoreSession {
       this.scheduleDocRead();
       this.maybeMarkSeen();
     }
-    if (r.docs.some((d) => d.name === 'herdr-app' && d.version !== this.layoutVersion)) this.scheduleDocRead();
+    if (r.docs.some((d) => d.name === 'herdr-app' && d.machine === null && d.version !== this.layoutVersion)) this.scheduleDocRead();
     // "Decide on the turn event": status/labels/size/foreground changes must
     // not overrule a mark-unread from another client while this screen stays
     // visible. A later turn is the genuine viewing transition that may raise it.

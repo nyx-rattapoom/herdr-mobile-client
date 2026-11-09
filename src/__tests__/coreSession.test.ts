@@ -64,12 +64,13 @@ describe('CoreSession events and documents', () => {
     // Another document, or the version already read, needs no re-read.
     core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 12, type: 'doc', data: { name: 'notes', version: 7 } } });
     core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 13, type: 'doc', data: { name: 'herdr-app', version: 1 } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 14, type: 'doc', machine: 'rohan', data: { name: 'herdr-app', version: 17 } } });
     await flush();
     expect(core.docReads).toBe(1);
 
     core.doc = { spaces: [] };
     core.docVersion = 2;
-    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 14, type: 'doc', data: { name: 'herdr-app', version: 2 } } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 15, type: 'doc', data: { name: 'herdr-app', version: 2 } } });
     await flush();
     expect(core.docReads).toBe(2);
     expect(session.snapshot().layoutVersion).toBe(2);
