@@ -6,6 +6,13 @@ import { parseLayout, type CoreLayout } from './layout';
 import { parseDocGet, parseSubscribe, parseTerminal, safeUint, CoreCommandError, type CoreTerminal } from './types';
 import type { ByteTransport } from './transport';
 
+/**
+ * Live-session error sources, tracked separately so one source's success never
+ * hides another's failure. A 'state' error means an update was dropped, so only
+ * an authoritative resnapshot (subscribe or `missed`) clears it; 'label' and
+ * 'reattach' clear on the next success of that operation. All clear when a new
+ * connect attempt starts.
+ */
 type TransientError = 'state' | 'label' | 'reattach';
 
 export type CoreSessionStatus = 'connecting' | 'live' | 'reconnecting' | 'error' | 'closed';
@@ -391,7 +398,7 @@ export class CoreSession {
     this.transientErrors.clear();
   }
 
-  /** Clears a live-session error once the same kind of operation succeeds. */
+  /** Clears one transient source; see `TransientError` for when each may clear. */
   private clearError(source: TransientError): void {
     if (!this.transientErrors.delete(source)) return;
     this.emit();
