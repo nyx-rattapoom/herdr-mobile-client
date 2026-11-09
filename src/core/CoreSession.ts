@@ -41,7 +41,7 @@ export class CoreSession {
   private docScheduled = false;
   private status: CoreSessionStatus = 'connecting';
   private error: string | null = null;
-  private errorSource: TransientError | null = null;
+  private readonly transientErrors = new Map<TransientError, string>();
   private hello: import('./types').CoreHello | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly panes = new Set<CorePane>();
@@ -60,7 +60,12 @@ export class CoreSession {
   snapshot(): CoreSessionSnapshot {
     return {
       status: this.status,
-      error: this.error,
+      error:
+        this.error ??
+        this.transientErrors.get('state') ??
+        this.transientErrors.get('label') ??
+        this.transientErrors.get('reattach') ??
+        null,
       hello: this.hello,
       state: this.state,
       layout: this.layout,
@@ -375,19 +380,19 @@ export class CoreSession {
   }
 
   private setError(e: unknown, source: TransientError | null): void {
-    this.error = e instanceof Error ? e.message : String(e);
-    this.errorSource = source;
+    const message = e instanceof Error ? e.message : String(e);
+    if (source) this.transientErrors.set(source, message);
+    else this.error = message;
   }
 
   private resetError(): void {
     this.error = null;
-    this.errorSource = null;
+    this.transientErrors.clear();
   }
 
   /** Clears a live-session error once the same kind of operation succeeds. */
   private clearError(source: TransientError): void {
-    if (this.errorSource !== source) return;
-    this.resetError();
+    if (!this.transientErrors.delete(source)) return;
     this.emit();
   }
 

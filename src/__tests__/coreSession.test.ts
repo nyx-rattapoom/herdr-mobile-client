@@ -202,6 +202,43 @@ describe('CoreSession shared state and input', () => {
     session.close();
   });
 
+  it('keeps a state error and a label error apart so neither success hides the other', async () => {
+    const { core, session } = await setup();
+    const rejectTurn = (seq: number) =>
+      core.event({ jsonrpc: '2.0', method: 'event', params: { seq, type: 'turn', terminal: 't7', data: { turn: Number.MAX_SAFE_INTEGER + 1 } } });
+
+    rejectTurn(11);
+    await flush();
+    core.failOnce.add('terminal.label');
+    session.setVisible('t7');
+    await flush();
+    expect(core.failOnce.size).toBe(0);
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+
+    // The label success repairs only the label failure, not the dropped event.
+    await session.setPinned('t7', true);
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 20, terminals: [coreRecord('t7', { labels: { 'herdr.seen': '1' } })] } });
+    await flush();
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+
+    // In the other order, the resnapshot leaves the outstanding label failure visible.
+    core.failOnce.add('terminal.label');
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 21, terminals: [coreRecord('t7', { turn: 2, labels: { 'herdr.seen': '1' } })] } });
+    await flush();
+    expect(core.failOnce.size).toBe(0);
+    expect(session.snapshot().error).toBe('busy');
+    rejectTurn(22);
+    await flush();
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 30, terminals: [coreRecord('t7', { turn: 2, labels: { 'herdr.seen': '1' } })] } });
+    await flush();
+    expect(session.snapshot().error).toBe('busy');
+    await session.setPinned('t7', false);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    session.close();
+  });
+
   it('keeps a rejected snapshot visible until an authoritative resnapshot replaces state', async () => {
     const { t, core, session } = await setup();
     core.event({
