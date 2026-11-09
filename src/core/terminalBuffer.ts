@@ -58,8 +58,7 @@ export class CoreTerminalBuffer {
     private _rows: number,
     private readonly historyLimit = MAX_HISTORY,
   ) {
-    this._cols = clamp(_cols, 1, MAX_COLS);
-    this._rows = clamp(_rows, 1, MAX_ROWS);
+    ({ cols: this._cols, rows: this._rows } = clampSize(_cols, _rows));
     this.bottom = this._rows - 1;
     this.cells = blankGrid(this._cols, this._rows);
     this.resetTabs();
@@ -108,8 +107,7 @@ export class CoreTerminalBuffer {
   }
 
   resize(cols: number, rows: number): void {
-    const c = clamp(cols, 1, MAX_COLS);
-    const r = clamp(rows, 1, MAX_ROWS);
+    const { cols: c, rows: r } = clampSize(cols, rows);
     if (c === this._cols && r === this._rows) return;
     this.cells = resizeGrid(this.cells, this._cols, this._rows, c, r);
     if (this.savedMain) this.savedMain.cells = resizeGrid(this.savedMain.cells, this._cols, this._rows, c, r);
@@ -350,6 +348,8 @@ export class CoreTerminalBuffer {
     const body = priv || secondary ? raw.slice(1) : raw;
     const params = parseParams(body);
     const p = (i: number, def = 0): number => (params[i] === undefined ? def : params[i]);
+    const rowsN = () => Math.min(this._rows, Math.max(1, p(0, 1)));
+    const colsN = () => Math.min(this._cols, Math.max(1, p(0, 1)));
     if (secondary) return;
     if (priv) {
       if (final === 'h' || final === 'l') for (const n of params) this.setPrivateMode(n, final === 'h');
@@ -403,25 +403,25 @@ export class CoreTerminalBuffer {
         this.eraseLine(p(0, 0));
         return;
       case 'L':
-        this.insertLines(Math.max(1, p(0, 1)));
+        this.insertLines(rowsN());
         return;
       case 'M':
-        this.deleteLines(Math.max(1, p(0, 1)));
+        this.deleteLines(rowsN());
         return;
       case 'P':
-        this.deleteChars(Math.max(1, p(0, 1)));
+        this.deleteChars(colsN());
         return;
       case '@':
-        this.insertChars(Math.max(1, p(0, 1)));
+        this.insertChars(colsN());
         return;
       case 'X':
-        this.eraseChars(Math.max(1, p(0, 1)));
+        this.eraseChars(colsN());
         return;
       case 'S':
-        this.scrollUp(this.top, this.bottom, Math.max(1, p(0, 1)));
+        this.scrollUp(this.top, this.bottom, rowsN());
         return;
       case 'T':
-        this.scrollDown(this.top, this.bottom, Math.max(1, p(0, 1)));
+        this.scrollDown(this.top, this.bottom, rowsN());
         return;
       case 'r': {
         const t = clamp(p(0, 1) - 1, 0, this._rows - 1);
@@ -444,17 +444,17 @@ export class CoreTerminalBuffer {
         this.style = applySgr(this.style, sgrParams(body));
         return;
       case 'b':
-        for (let i = 0; i < Math.max(1, p(0, 1)); i++) this.print(this.lastCh, this.lastWidth);
+        for (let i = Math.min(this._cols * this._rows, Math.max(1, p(0, 1))); i > 0; i--) this.print(this.lastCh, this.lastWidth);
         return;
       case 'g':
         if (p(0, 0) === 0) this.tabs.delete(this.col);
         else if (p(0, 0) === 3) this.tabs.clear();
         return;
       case 'I':
-        this.tabForward(Math.max(1, p(0, 1)));
+        this.tabForward(colsN());
         return;
       case 'Z':
-        this.tabBackward(Math.max(1, p(0, 1)));
+        this.tabBackward(colsN());
         return;
       case 'h':
       case 'l':
@@ -702,6 +702,10 @@ export class CoreTerminalBuffer {
     }
     this.wrapPending = false;
   }
+}
+
+export function clampSize(cols: number, rows: number): { cols: number; rows: number } {
+  return { cols: clamp(cols, 1, MAX_COLS), rows: clamp(rows, 1, MAX_ROWS) };
 }
 
 function clamp(n: number, lo: number, hi: number): number {

@@ -149,9 +149,12 @@ export class TestCore {
         this.attachParams.push(params);
         const address = params.terminal as string;
         const channel = this.nextChannel++;
+        const record = this.terminals.get(address) ?? coreRecord(address);
+        // An observer never sizes the terminal; an active viewer does.
+        const size = params.observe === true ? {} : { cols: params.cols, rows: params.rows };
         reply({
           channel,
-          terminal: { ...(this.terminals.get(address) ?? coreRecord(address)), cols: params.cols, rows: params.rows },
+          terminal: { ...record, ...size },
           resize_notifications: true,
           automatic_input: true,
         });

@@ -79,6 +79,29 @@ describe('CoreTerminalBuffer text and controls', () => {
     expect(line[4]).toEqual({ text: 'e', style: {} });
   });
 
+  it('clamps hostile repeat counts to the screen instead of looping on them', () => {
+    const huge = '999999999';
+    const buf = new CoreTerminalBuffer(4, 2, 5);
+    const rep = Date.now();
+    feed(buf, `x\x1b[${huge}b`);
+    expect(Date.now() - rep).toBeLessThan(1000);
+    expect(text(buf).split('\n')[0]).toBe('xxxx');
+    expect(buf.historyLength).toBeLessThanOrEqual(5);
+    for (const final of ['L', 'M', 'S', 'T', '@', 'P', 'X', 'I', 'Z']) {
+      const b = new CoreTerminalBuffer(4, 3, 5);
+      feed(b, 'ab\r\ncd\x1b[1;2H');
+      const started = Date.now();
+      feed(b, `\x1b[${huge}${final}`);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(b.historyLength).toBeLessThanOrEqual(5);
+    }
+    const scrolled = new CoreTerminalBuffer(4, 3, 10);
+    feed(scrolled, 'a\r\nb\r\nc');
+    feed(scrolled, `\x1b[${huge}S`);
+    expect(text(scrolled)).toBe('');
+    expect(scrolled.historyLength).toBe(3);
+  });
+
   it('enters and leaves the alternate screen without losing the main screen', () => {
     const buf = new CoreTerminalBuffer(10, 3);
     feed(buf, 'main');

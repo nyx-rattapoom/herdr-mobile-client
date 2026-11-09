@@ -255,12 +255,3 @@ export function parseDocGet(v: unknown): { value: unknown; version: number } {
   if (!isObj(v)) throw new CoreProtocolError('doc', 'doc.get result is not an object');
   return { value: v.value, version: safeUint(v.version, 'doc.version') };
 }
-
-export function isTerminalLive(t: CoreTerminal): boolean {
-  return t.state === 'live';
-}
-
-/** A stable, machine-qualified key. Different core identities never collide. */
-export function terminalKey(coreId: string, address: string): string {
-  return `${coreId}|${address}`;
-}

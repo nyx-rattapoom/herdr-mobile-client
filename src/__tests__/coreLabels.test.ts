@@ -43,10 +43,10 @@ describe('shared seen label', () => {
     expect(attentionOf(terminal({ state: 'finished' }))).toBe('finished');
   });
 
-  it('falls back to local seen only when the shared label is missing', () => {
-    expect(attentionOf(terminal({ status: { state: 'done' }, turn: 4 }), 4)).toBe('idle');
-    expect(attentionOf(terminal({ status: { state: 'done' }, turn: 4 }), 3)).toBe('done');
-    expect(attentionOf(terminal({ status: { state: 'done' }, turn: 4, labels: { 'herdr.seen': '4' } }), 0)).toBe('idle');
+  it('treats a missing or invalid seen label as never seen, not as turn 0', () => {
+    expect(attentionOf(terminal({ status: { state: 'done' }, turn: 4 }))).toBe('done');
+    expect(attentionOf(terminal({ status: { state: 'done' }, turn: 4, labels: { 'herdr.seen': 'x' } }))).toBe('done');
+    expect(attentionOf(terminal({ status: { state: 'idle' }, turn: 0 }))).toBe('idle');
   });
 
   it('raises seen once per reached turn and never lowers it', () => {

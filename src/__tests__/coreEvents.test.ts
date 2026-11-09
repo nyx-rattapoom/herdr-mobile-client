@@ -1,4 +1,4 @@
-import { emptyCoreState, liveTerminals, reduceNotification, terminalList } from '../core/events';
+import { emptyCoreState, reduceNotification } from '../core/events';
 import type { CoreTerminal } from '../core/types';
 
 const record = (address: string, over: Partial<Record<string, unknown>> = {}): Record<string, unknown> => ({
@@ -24,10 +24,10 @@ const record = (address: string, over: Partial<Record<string, unknown>> = {}): R
   ...over,
 });
 
-const event = (seq: number, type: string, terminal: string, data: unknown, machine?: string) => ({
+const event = (seq: number, type: string, terminal: string, data: unknown) => ({
   jsonrpc: '2.0',
   method: 'event',
-  params: { seq, type, terminal, ...(machine ? { machine } : {}), data },
+  params: { seq, type, terminal, data },
 });
 
 function apply(state: ReturnType<typeof emptyCoreState>, notifications: { method: string; params: Record<string, unknown> }[] = [], events: unknown[] = []) {
@@ -85,7 +85,6 @@ describe('core event reduction', () => {
   it('applies lost, finished, keep and removed transitions', () => {
     let s = apply(emptyCoreState(), [], [event(1, 'created', 't7', record('t7')), event(2, 'finished', 't7', { reason: 'exited', exit_code: 3, signal: null, finished_ms: 2222 })]);
     expect(find(s, 't7')).toMatchObject({ state: 'finished', reason: 'exited', exitCode: 3, finishedMs: 2222, status: null });
-    expect(liveTerminals(s)).toEqual([]);
 
     s = reduceNotification(s, 'event', event(3, 'lost', 't7', { reason: 'core restarted', exit_code: null, signal: 9, finished_ms: null }).params).state;
     expect(find(s, 't7')).toMatchObject({ state: 'live', reason: 'core restarted', signal: 9, finishedMs: null });
@@ -112,16 +111,16 @@ describe('core event reduction', () => {
     expect(find(s, 't7').reported).toBe(false);
   });
 
-  it('keeps machine-qualified addresses distinct', () => {
-    const s = apply(
-      emptyCoreState(),
-      [],
-      [
-        event(1, 'created', 't7', record('t7')),
-        { jsonrpc: '2.0', method: 'event', params: { seq: 2, type: 'created', terminal: 't7', machine: 'rohan', data: record('rohan/t7') } },
-      ],
-    );
-    expect(terminalList(s).map((t) => t.address)).toEqual(['rohan/t7', 't7']);
+  it('keeps machine-qualified addresses distinct through later patches and removal', () => {
+    // herdr-core remote.rs localizes a mirrored event's `terminal` to `rohan/t7`
+    // before delivering it; terminal events carry no separate `machine`.
+    let s = apply(emptyCoreState(), [], [event(1, 'created', 't7', record('t7', { turn: 1 })), event(2, 'created', 'rohan/t7', record('rohan/t7', { turn: 1 }))]);
+    expect([...s.terminals.keys()].sort()).toEqual(['rohan/t7', 't7']);
+    s = apply(s, [], [event(3, 'turn', 'rohan/t7', { turn: 8 }), event(4, 'finished', 'rohan/t7', { reason: 'exited', exit_code: 0, signal: null, finished_ms: 5 })]);
+    expect(find(s, 'rohan/t7')).toMatchObject({ turn: 8, state: 'finished' });
+    expect(find(s, 't7')).toMatchObject({ turn: 1, state: 'live' });
+    s = apply(s, [], [event(5, 'removed', 'rohan/t7', {})]);
+    expect([...s.terminals.keys()]).toEqual(['t7']);
   });
 
   it('ignores repeated and stale sequences but accepts a later one', () => {

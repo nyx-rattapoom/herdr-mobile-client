@@ -178,11 +178,3 @@ export function reduceNotification(state: CoreState, method: string, params: Rec
       return { state: base, docs: [], missed: false };
   }
 }
-
-export function terminalList(state: CoreState): CoreTerminal[] {
-  return [...state.terminals.values()].sort((a, b) => a.address.localeCompare(b.address));
-}
-
-export function liveTerminals(state: CoreState): CoreTerminal[] {
-  return terminalList(state).filter((t) => t.state === 'live');
-}

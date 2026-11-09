@@ -84,10 +84,6 @@ export function encodeFrame(channel: number, kind: number, payload: Uint8Array =
   return concatBytes(header(channel, kind, payload.length), payload);
 }
 
-export function encodeJsonFrame(message: unknown): Uint8Array {
-  return encodeFrame(0, FRAME.DATA, encodeUtf8(JSON.stringify(message)));
-}
-
 export function creditFrame(channel: number, bytes: number): Uint8Array {
   const p = new Uint8Array(4);
   p[0] = bytes & 0xff;

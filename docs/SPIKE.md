@@ -195,7 +195,8 @@ Date: 2026-11-09. Sources pinned at herdr-core `3ba03e6fc59fb974a4e2627586646f87
   `event` (`created`, `restarted`, `lost`, `finished`, `removed`, `keep`, `status`, `turn`, `title`, `labels`,
   `size`, `foreground`, `doc`), `heartbeat {seq}`, and `missed {seq, terminals}`. The client resnapshots on
   `missed`/reconnect and reads documents after subscribe, `missed`, docs events and reconnects.
-- **Shared state.** `herdr.seen=<turn>` is raise-only; a missing label means "use local seen", not turn 0.
+- **Shared state.** `herdr.seen=<turn>` is raise-only; a missing label is not turn 0: the client applies its own
+  rule (this app shows any finished turn, `turn > 0`, as done) and keeps no separate local seen counter.
   Unpin writes `herdr.pinned=""`; pin writes `herdr.pinned=1`. No bulk upload of local pins happens.
 - **Layout.** The `herdr-app` document is read only (`doc.get`): spaces → tabs → nodes (block/row/column/stack,
   optional floating blocks). Unknown content is ignored and never written back.

@@ -16,7 +16,7 @@ jest.mock('../../modules/herdr-ssh', () => ({
   },
 }));
 
-const native = HerdrSsh as unknown as Record<'openExecStream' | 'startExecStream' | 'addListener', jest.Mock>;
+const native = HerdrSsh as unknown as Record<'openExecStream' | 'startExecStream' | 'addListener' | 'writeBytes', jest.Mock>;
 
 describe('NativeCoreTransport platform gate', () => {
   const original = Platform.OS;
@@ -45,6 +45,36 @@ describe('NativeCoreTransport platform gate', () => {
     expect(native.startExecStream.mock.invocationCallOrder[0]).toBeGreaterThan(
       Math.max(...native.addListener.mock.invocationCallOrder),
     );
+  });
+
+  it('hands frames to the native stream one at a time, in call order', async () => {
+    setOs('android');
+    const t = await NativeCoreTransport.open('s1');
+    const pending: (() => void)[] = [];
+    native.writeBytes.mockImplementation(() => new Promise<void>((resolve) => pending.push(resolve)));
+    const first = t.write(Uint8Array.of(1));
+    const second = t.write(Uint8Array.of(2));
+    const third = t.write(Uint8Array.of(3));
+    await Promise.resolve();
+    expect(native.writeBytes.mock.calls.map((c) => c[1])).toEqual(['AQ==']);
+    pending.shift()?.();
+    await first;
+    await Promise.resolve();
+    expect(native.writeBytes.mock.calls.map((c) => c[1])).toEqual(['AQ==', 'Ag==']);
+    pending.shift()?.();
+    await second;
+    await Promise.resolve();
+    pending.shift()?.();
+    await third;
+    expect(native.writeBytes.mock.calls.map((c) => c[1])).toEqual(['AQ==', 'Ag==', 'Aw==']);
+  });
+
+  it('keeps later writes flowing after one native write fails', async () => {
+    setOs('android');
+    const t = await NativeCoreTransport.open('s1');
+    native.writeBytes.mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);
+    await expect(t.write(Uint8Array.of(1))).rejects.toThrow('boom');
+    await expect(t.write(Uint8Array.of(2))).resolves.toBeUndefined();
   });
 
   it('never opens a stream for a stored hc path that fails validation', async () => {

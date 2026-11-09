@@ -16,14 +16,14 @@ export function seenOf(t: Pick<CoreTerminal, 'labels'>): number | null {
   return parseTurn(t.labels[SEEN_LABEL]);
 }
 
-/** Missing is not zero: callers must use a local fallback instead. */
-export function attentionOf(t: CoreTerminal, localSeen: number | null = null): Attention {
+/** A missing label is not turn 0: any finished turn then counts as done. */
+export function attentionOf(t: CoreTerminal): Attention {
   if (t.state !== 'live') return 'finished';
   const word = t.status?.state;
   if (!word) return 'unknown';
   if (word === 'blocked' || word === 'error') return 'needs';
   if (word === 'working') return 'working';
-  const seen = seenOf(t) ?? localSeen;
+  const seen = seenOf(t);
   if (seen === null) return t.turn > 0 ? 'done' : 'idle';
   return t.turn > seen ? 'done' : 'idle';
 }
@@ -58,10 +58,10 @@ export function pinnedLabels(pinned: boolean): Record<string, string> {
 const rank: Record<Attention, number> = { needs: 0, done: 1, working: 2, unknown: 3, idle: 4, finished: 5 };
 
 /** Pinned first, then needing attention, done, working, unknown, idle, finished. */
-export function compareTerminals(a: CoreTerminal, b: CoreTerminal, seenA: number | null = null, seenB: number | null = null): number {
+export function compareTerminals(a: CoreTerminal, b: CoreTerminal): number {
   const pin = Number(isPinned(b)) - Number(isPinned(a));
   if (pin) return pin;
-  const r = rank[attentionOf(a, seenA)] - rank[attentionOf(b, seenB)];
+  const r = rank[attentionOf(a)] - rank[attentionOf(b)];
   if (r) return r;
   return a.address.localeCompare(b.address);
 }

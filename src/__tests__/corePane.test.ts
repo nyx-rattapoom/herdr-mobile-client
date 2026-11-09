@@ -63,6 +63,25 @@ describe('CorePane attach lifecycle', () => {
     session.close();
   });
 
+  it('keeps the observed terminal size while observing and claims with the phone viewport', async () => {
+    const { t, core, session } = await setup();
+    const pane = session.pane('t7', 20, 4, true);
+    await pane.open();
+    // The observe reply carries the terminal's own (desktop) size.
+    expect([pane.buffer.cols, pane.buffer.rows]).toEqual([80, 24]);
+    await pane.resize(30, 10);
+    expect([pane.buffer.cols, pane.buffer.rows]).toEqual([80, 24]);
+    core.paint(5, '\x1b[24;80HZ');
+    expect(pane.buffer.cursor).toEqual({ row: 23, col: 79 });
+
+    t.clear();
+    await pane.claimInput();
+    expect(core.attachParams[1]).toMatchObject({ cols: 30, rows: 10, observe: false });
+    expect([pane.buffer.cols, pane.buffer.rows]).toEqual([30, 10]);
+    expect(t.frames.filter((f) => f.kind === FRAME.RESIZE)).toHaveLength(0);
+    session.close();
+  });
+
   it('does not send RESIZE while observing, and detaches without terminal.kill', async () => {
     const { t, session } = await setup();
     const pane = session.pane('t7', 20, 4, true);

@@ -15,7 +15,6 @@ import {
   decodeCredit,
   decodeResize,
   encodeFrame,
-  encodeJsonFrame,
   resizeFrame,
 } from '../core/frames';
 
@@ -183,14 +182,5 @@ describe('frame parser', () => {
     const bad = new Uint8Array(9);
     bad[4] = 99;
     expect(() => new FrameParser().push(bad)).toThrow(/unknown frame kind/);
-  });
-
-  it('encodes JSON on channel 0 as one framed message', () => {
-    const f = encodeJsonFrame({ id: 1, method: 'x' });
-    expect(f[0]).toBe(0);
-    expect(f[4]).toBe(FRAME.DATA);
-    const tail = new FrameParser().push(f)[0];
-    expect(JSON.parse(decodeUtf8(tail.payload)).method).toBe('x');
-    expect(creditFrame(1, 5).length).toBe(13);
   });
 });

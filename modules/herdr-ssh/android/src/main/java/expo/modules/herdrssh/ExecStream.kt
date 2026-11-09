@@ -18,13 +18,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * more than [MAX_PENDING_BYTES] are waiting, the stream closes with
  * "output queue overflow" instead of growing memory; this is a hard bound,
  * not backpressure on the SSH window.
- * Delivery starts only when [start] is called, after JS has installed its
- * listeners, so the first paint can never be lost before registration.
+ * [input] and [errInput] are taken from the channel before it connects, so
+ * output and EOF that arrive before [start] wait in the JSch pipes. Delivery
+ * starts only when [start] is called, after JS has installed its listeners,
+ * so the first paint and an early exit can never be lost before registration.
  */
 class ExecStream(
   val id: String,
   val sessionId: String,
   private val channel: ChannelExec,
+  private val input: InputStream,
+  private val errInput: InputStream,
   private val emitBytes: (String, ByteArray) -> Unit,
   private val emitClosed: (String, String, Int?, String) -> Unit,
 ) {
@@ -45,7 +49,6 @@ class ExecStream(
   private val stderr = ByteArrayOutputStream()
   private val reader = Runnable {
     try {
-      val input: InputStream = channel.inputStream
       val buf = ByteArray(CHUNK)
       while (!closed.get()) {
         val n = input.read(buf)
@@ -71,10 +74,9 @@ class ExecStream(
 
   private val errReader = Runnable {
     try {
-      val input: InputStream = channel.errStream
       val buf = ByteArray(4096)
       while (!closed.get()) {
-        val n = input.read(buf)
+        val n = errInput.read(buf)
         if (n < 0) break
         synchronized(stderr) {
           if (stderr.size() < MAX_STDERR_BYTES) {

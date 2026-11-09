@@ -26,6 +26,7 @@ export class NativeCoreTransport implements ByteTransport {
   private closed: (info: TransportClose) => void = () => {};
   private subs: { remove(): void }[] = [];
   private done = false;
+  private writes: Promise<void> = Promise.resolve();
 
   private constructor(private readonly channelId: string) {}
 
@@ -51,9 +52,13 @@ export class NativeCoreTransport implements ByteTransport {
     return t;
   }
 
+  /** Writes reach the native stream one at a time, in call order. */
   write(bytes: Uint8Array): Promise<void> {
     if (this.done) return Promise.reject(explainCoreClose({ reason: 'closed', exitCode: null, stderr: '' }));
-    return HerdrSsh.writeBytes(this.channelId, bytesToBase64(bytes));
+    const data = bytesToBase64(bytes);
+    const written = this.writes.then(() => HerdrSsh.writeBytes(this.channelId, data));
+    this.writes = written.catch(() => {});
+    return written;
   }
 
   onBytes(handler: (chunk: Uint8Array) => void): void {

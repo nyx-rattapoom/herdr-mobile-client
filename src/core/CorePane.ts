@@ -1,5 +1,5 @@
 import { encodeUtf8 } from './bytes';
-import { CoreTerminalBuffer } from './terminalBuffer';
+import { CoreTerminalBuffer, clampSize } from './terminalBuffer';
 import { parseAttach, CoreCommandError, type CoreAttach } from './types';
 import type { CoreSession } from './CoreSession';
 
@@ -23,6 +23,8 @@ export class CorePane {
   private opening: Promise<void> | null = null;
   private claiming: Promise<void> | null = null;
   private generation = 0;
+  /** The phone's size. The buffer follows it only while this viewer is active. */
+  private viewport: { cols: number; rows: number };
 
   constructor(
     private readonly core: CoreSession,
@@ -32,6 +34,7 @@ export class CorePane {
     observe = true,
   ) {
     this.buffer = new CoreTerminalBuffer(cols, rows);
+    this.viewport = clampSize(cols, rows);
     this.observe = observe;
   }
 
@@ -58,12 +61,13 @@ export class CorePane {
     const client = this.core.currentClient();
     if (!client) throw new CoreCommandError('not_connected', 'Herdr Core is not connected');
     const gen = ++this.generation;
+    const requested = { ...this.viewport };
     const result = await client.request<unknown>(
       'terminal.attach',
       {
         terminal: this.address,
-        cols: this.buffer.cols,
-        rows: this.buffer.rows,
+        cols: requested.cols,
+        rows: requested.rows,
         history: 2000,
         observe,
         resize_notifications: true,
@@ -79,7 +83,8 @@ export class CorePane {
     }
     this.detachChannel();
     this.buffer.reset();
-    this.buffer.resize(attach.terminal.cols || this.buffer.cols, attach.terminal.rows || this.buffer.rows);
+    if (observe) this.buffer.resize(attach.terminal.cols || this.buffer.cols, attach.terminal.rows || this.buffer.rows);
+    else this.buffer.resize(this.viewport.cols, this.viewport.rows);
     this.observe = observe;
     this.attach = attach;
     this.channel = attach.channel;
@@ -102,6 +107,9 @@ export class CorePane {
         this.emit();
       },
     });
+    if (!observe && (requested.cols !== this.viewport.cols || requested.rows !== this.viewport.rows)) {
+      void client.resize(attach.channel, this.viewport.cols, this.viewport.rows).catch(() => {});
+    }
     this.emit();
   }
 
@@ -133,9 +141,11 @@ export class CorePane {
   }
 
   async resize(cols: number, rows: number): Promise<void> {
-    this.buffer.resize(cols, rows);
+    this.viewport = clampSize(cols, rows);
+    if (this.observe) return;
+    this.buffer.resize(this.viewport.cols, this.viewport.rows);
     const client = this.core.currentClient();
-    if (client && this.channel !== null && !this.observe) await client.resize(this.channel, cols, rows);
+    if (client && this.channel !== null) await client.resize(this.channel, this.viewport.cols, this.viewport.rows);
     this.emit();
   }
 

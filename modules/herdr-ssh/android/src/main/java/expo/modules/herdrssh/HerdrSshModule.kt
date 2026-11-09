@@ -176,6 +176,8 @@ class HerdrSshModule : Module() {
         val channel = session.openChannel("exec") as ChannelExec
         channel.setPty(false)
         channel.setCommand(command)
+        val input = channel.inputStream
+        val errInput = channel.errStream
         try {
           channel.connect(CHANNEL_TIMEOUT_MS)
         } catch (e: JSchException) {
@@ -187,6 +189,8 @@ class HerdrSshModule : Module() {
           id,
           sessionId,
           channel,
+          input,
+          errInput,
           emitBytes = ::emitBytes,
           emitClosed = ::emitClosed,
         )
