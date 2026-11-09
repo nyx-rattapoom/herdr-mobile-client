@@ -39,7 +39,9 @@ export class CoreTerminalBuffer {
   private saved: { row: number; col: number; style: Style } | null = null;
   private altScreen = false;
   private savedMain: { cells: Cell[][]; row: number; col: number; style: Style } | null = null;
+  /** A ring once full: `historyHead` is the oldest line. */
   private history: Line[] = [];
+  private historyHead = 0;
   private tabs = new Set<number>();
   private utf8 = new Utf8Stream();
 
@@ -50,11 +52,6 @@ export class CoreTerminalBuffer {
   private oscEsc = false;
   private lastCh = ' ';
   private lastWidth: 1 | 2 = 1;
-
-  cursorVisible = true;
-  win32InputMode = false;
-  bracketedPaste = false;
-  title = '';
 
   constructor(
     private _cols: number,
@@ -102,7 +99,7 @@ export class CoreTerminalBuffer {
     this.saved = null;
     this.altScreen = false;
     this.savedMain = null;
-    this.history = [];
+    this.clearHistory();
     this.state = 'ground';
     this.seq = '';
     this.seqOverflow = false;
@@ -129,13 +126,14 @@ export class CoreTerminalBuffer {
     return this.cells.map((row) => rowToLine(row));
   }
 
-  /** History followed by the current screen, ready for `layoutLine`/`TermRow`. */
+  /**
+   * History (oldest first) followed by the current screen, ready for
+   * `layoutLine`/`TermRow`. The first `historyLength` lines never change once
+   * pushed, so callers may cache their layout by identity.
+   */
   allLines(): Line[] {
-    return [...this.history, ...this.screenLines()];
-  }
-
-  historyLines(): Line[] {
-    return this.history;
+    const h = this.history;
+    return [...h.slice(this.historyHead), ...h.slice(0, this.historyHead), ...this.screenLines()];
   }
 
   /** Plain-text snapshot for diagnostics and tests. */
@@ -339,13 +337,6 @@ export class CoreTerminalBuffer {
   }
 
   private finishString(): void {
-    if (!this.seqOverflow && this.state === 'osc') {
-      const semi = this.seq.indexOf(';');
-      if (semi > 0) {
-        const code = Number(this.seq.slice(0, semi));
-        if ((code === 0 || code === 2) && this.seq.length < 4096) this.title = this.seq.slice(semi + 1);
-      }
-    }
     this.state = 'ground';
     this.seq = '';
     this.seqOverflow = false;
@@ -483,20 +474,11 @@ export class CoreTerminalBuffer {
       case 7:
         this.autoWrap = on;
         return;
-      case 25:
-        this.cursorVisible = on;
-        return;
       case 47:
       case 1047:
       case 1049:
         if (on) this.enterAlt();
         else this.leaveAlt();
-        return;
-      case 2004:
-        this.bracketedPaste = on;
-        return;
-      case 9001:
-        this.win32InputMode = on;
         return;
       default:
         return;
@@ -632,8 +614,18 @@ export class CoreTerminalBuffer {
   }
 
   private pushHistory(line: Line): void {
-    this.history.push(line);
-    if (this.history.length > this.historyLimit) this.history.splice(0, this.history.length - this.historyLimit);
+    if (this.historyLimit <= 0) return;
+    if (this.history.length < this.historyLimit) {
+      this.history.push(line);
+      return;
+    }
+    this.history[this.historyHead] = line;
+    this.historyHead = (this.historyHead + 1) % this.historyLimit;
+  }
+
+  private clearHistory(): void {
+    this.history = [];
+    this.historyHead = 0;
   }
 
   private eraseLine(mode: number): void {
@@ -645,7 +637,7 @@ export class CoreTerminalBuffer {
 
   private eraseDisplay(mode: number): void {
     if (mode === 3) {
-      this.history = [];
+      this.clearHistory();
       return;
     }
     if (mode === 2) {

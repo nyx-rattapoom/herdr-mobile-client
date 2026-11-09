@@ -84,6 +84,20 @@ describe('CoreSession events and documents', () => {
     session.close();
   });
 
+  it('resubscribes and re-reads documents every time the core closes the event channel', async () => {
+    const { t, core, session } = await setup();
+    for (let loss = 1; loss <= 3; loss++) {
+      t.push(encodeFrame(2, FRAME.CLOSE));
+      await flush();
+      expect(core.subscribeCount).toBe(1 + loss);
+      expect(core.docReads).toBe(1 + loss);
+    }
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 11, type: 'turn', terminal: 't7', data: { turn: 5, state: 'done' } } });
+    expect(session.snapshot().state.terminals.get('t7')?.turn).toBe(5);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    session.close();
+  });
+
   it('reconnects with a new handshake and ignores the old generation', async () => {
     const first = new FakeByteTransport();
     const firstCore = new TestCore(first);

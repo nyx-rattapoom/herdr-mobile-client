@@ -1,3 +1,4 @@
+import { validateHerdrPath } from '../protocol/sessions';
 import { CoreCommandError } from './types';
 
 /** Distinct remote exit code so "no hc" is never mistaken for a protocol loss. */
@@ -9,10 +10,12 @@ const hcExpr = (p: string) => (p.startsWith('~/') ? `"$HOME"/${p.slice(2)}` : p)
  * Resolve `hc` on the server and replace the shell with `hc connect`.
  *
  * The stream is a no-PTY exec channel: stdin and stdout are the protocol.
- * `hcPath` is validated by the profile form/store before it reaches here, so
- * it can never add shell syntax. Nothing is installed or upgraded remotely.
+ * `hcPath` is checked with the same validator as the profile form, so stored
+ * data can never add shell syntax. Nothing is installed or upgraded remotely.
  */
 export function coreConnectCommand(hcPath?: string): string {
+  const pathErr = validateHerdrPath(hcPath ?? '');
+  if (pathErr) throw new CoreCommandError('hc_path_invalid', `hc path: ${pathErr}`);
   const configured = hcPath?.trim() ? hcExpr(hcPath.trim()) : '';
   const script = [
     'H=""',

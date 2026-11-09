@@ -16,10 +16,11 @@ import {
 import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
 import { Header, colors, styles } from './ui';
 import { draftKey, getDraft, setDraft } from '../live/drafts';
-import { layoutLine } from '../live/grid';
+import { layoutLine, type GridLine } from '../live/grid';
+import type { Line } from '../live/ansi';
 import type { CorePane } from '../core/CorePane';
 import type { CoreSession, CoreSessionSnapshot } from '../core/CoreSession';
-import { attentionOf, compareTerminals, isPinned, seenOf, type Attention } from '../core/labels';
+import { attentionOf, compareTerminals, isPinned, type Attention } from '../core/labels';
 import { unplacedTerminals } from '../core/layout';
 import type { CoreTerminal } from '../core/types';
 import type { ServerProfile } from '../store/servers';
@@ -67,7 +68,6 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
   const [selected, setSelected] = useState<string | null>(null);
   const terminals = useMemo(() => [...snapshot.state.terminals.values()], [snapshot.state]);
   const current = selected ? snapshot.state.terminals.get(selected) : undefined;
-  const localSeen = (t: CoreTerminal) => (t.address ? seenOf(t) : null);
 
   if (current && current.state === 'live') {
     return (
@@ -81,7 +81,7 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
     );
   }
 
-  const sorted = [...terminals].sort((a, b) => compareTerminals(a, b, localSeen(a), localSeen(b)));
+  const sorted = [...terminals].sort((a, b) => compareTerminals(a, b));
   const layout = snapshot.layout;
   const unplaced = unplacedTerminals(layout, sorted);
   const byAddress = (address: string) => snapshot.state.terminals.get(address);
@@ -232,7 +232,8 @@ function CoreTerminalView({
   const [error, setError] = useState<string | null>(null);
   const [text, setTextState] = useState(() => getDraft(draftKey(server.id, 'core', terminal.address)));
   const [follow, setFollow] = useState(true);
-  const list = useRef<FlatList<ReturnType<typeof layoutLine>>>(null);
+  const list = useRef<FlatList<GridLine>>(null);
+  const [historyLayout] = useState(() => new WeakMap<Line, GridLine>());
   const { metrics } = useCellMetrics(FONT);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const key = draftKey(server.id, 'core', terminal.address);
@@ -296,8 +297,18 @@ function CoreTerminalView({
 
   const lines = useMemo(() => {
     void tick;
-    return pane ? pane.buffer.allLines().map((l) => layoutLine(l, TERM_FG, TERM_BG)) : [];
-  }, [pane, tick]);
+    if (!pane) return [];
+    const history = pane.buffer.historyLength;
+    return pane.buffer.allLines().map((l, i) => {
+      if (i >= history) return layoutLine(l, TERM_FG, TERM_BG);
+      let laid = historyLayout.get(l);
+      if (!laid) {
+        laid = layoutLine(l, TERM_FG, TERM_BG);
+        historyLayout.set(l, laid);
+      }
+      return laid;
+    });
+  }, [pane, tick, historyLayout]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;

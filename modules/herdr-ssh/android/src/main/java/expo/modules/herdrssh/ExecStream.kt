@@ -13,8 +13,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * A long-lived, no-PTY exec channel whose stdout is delivered as raw bytes.
  *
  * The reader is deliberately not allowed to outrun the JS consumer without
- * bound: bytes need a permit from [pending] before they enter the queue, so a
- * stalled consumer eventually stops the SSH window instead of growing memory.
+ * bound: bytes need a permit from [pending] before they enter the queue, and a
+ * permit is returned once the bridge event for those bytes has been sent. If
+ * more than [MAX_PENDING_BYTES] are waiting, the stream closes with
+ * "output queue overflow" instead of growing memory; this is a hard bound,
+ * not backpressure on the SSH window.
  * Delivery starts only when [start] is called, after JS has installed its
  * listeners, so the first paint can never be lost before registration.
  */
@@ -40,7 +43,7 @@ class ExecStream(
   private val pending = Semaphore(MAX_PENDING_BYTES)
   private val queue = ArrayBlockingQueue<ByteArray>(QUEUE_CHUNKS)
   private val stderr = ByteArrayOutputStream()
-  private val reader = Thread {
+  private val reader = Runnable {
     try {
       val input: InputStream = channel.inputStream
       val buf = ByteArray(CHUNK)
@@ -50,7 +53,7 @@ class ExecStream(
         if (n == 0) continue
         if (!pending.tryAcquire(n)) {
           finish("output queue overflow")
-          return@Thread
+          return@Runnable
         }
         queue.put(buf.copyOf(n))
       }
@@ -64,9 +67,9 @@ class ExecStream(
     } catch (e: Exception) {
       finish(e.message ?: "read error")
     }
-  }.apply { name = "herdr-exec-out-$id" }
+  }
 
-  private val errReader = Thread {
+  private val errReader = Runnable {
     try {
       val input: InputStream = channel.errStream
       val buf = ByteArray(4096)
@@ -82,12 +85,13 @@ class ExecStream(
     } catch (_: Exception) {
       // stderr is diagnostic only; stdout owns protocol delivery.
     }
-  }.apply { name = "herdr-exec-err-$id" }
+  }
 
-  private val emitter = Thread {
+  private val emitter = Runnable {
     try {
       while (!closed.get()) {
         val bytes = queue.take()
+        if (closed.get()) break
         if (bytes.isEmpty()) {
           if (endOfInput.get() && queue.isEmpty()) {
             // Let JSch record the remote exit-status before the close event, so
@@ -106,7 +110,7 @@ class ExecStream(
     } catch (_: InterruptedException) {
       Thread.currentThread().interrupt()
     }
-  }.apply { name = "herdr-exec-emit-$id" }
+  }
 
   fun start(io: ExecutorService) {
     if (!started.compareAndSet(false, true) || closed.get()) return
@@ -141,9 +145,8 @@ class ExecStream(
       channel.disconnect()
     } catch (_: Exception) {
     }
-    reader.interrupt()
-    errReader.interrupt()
-    emitter.interrupt()
+    queue.clear()
+    queue.offer(ByteArray(0))
     emitClosed(id, reason, code, err)
   }
 }

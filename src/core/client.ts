@@ -58,6 +58,7 @@ export class CoreClient {
   private readonly streams = new Map<number, CoreStreamHandlers>();
   private readonly early = new Map<number, { chunks: Uint8Array[]; bytes: number }>();
   private earlyBytes = 0;
+  private readonly detached = new Set<number>();
   private eventHandler: (method: string, params: Record<string, unknown>) => void = () => {};
   private readonly closeHandlers: ((err: Error) => void)[] = [];
   private closeError: Error | null = null;
@@ -167,16 +168,17 @@ export class CoreClient {
       return;
     }
     this.streams.set(channel, handlers);
-    const early = this.early.get(channel);
-    if (!early) return;
-    this.early.delete(channel);
-    this.earlyBytes -= early.bytes;
-    for (const chunk of early.chunks) handlers.onData(chunk);
+    this.detached.delete(channel);
+    const early = this.takeEarly(channel);
+    if (early) for (const chunk of early.chunks) handlers.onData(chunk);
   }
 
-  unregisterStream(channel: number): void {
-    this.streams.delete(channel);
+  private takeEarly(channel: number): { chunks: Uint8Array[]; bytes: number } | undefined {
+    const early = this.early.get(channel);
+    if (!early) return undefined;
     this.early.delete(channel);
+    this.earlyBytes -= early.bytes;
+    return early;
   }
 
   /**
@@ -209,7 +211,9 @@ export class CoreClient {
   closeStream(channel: number): void {
     if (this.mode !== 'framed' || this.closed) return;
     const stream = this.streams.get(channel);
-    this.unregisterStream(channel);
+    this.streams.delete(channel);
+    this.takeEarly(channel);
+    this.detached.add(channel);
     void this.transport.write(closeFrame(channel, 'detached')).catch(() => {});
     stream?.onClose('detached');
   }
@@ -317,6 +321,8 @@ export class CoreClient {
       void this.transport.write(creditFrame(channel, payload.length)).catch((e) => this.fail(asError(e)));
       return;
     }
+    // Frames already in flight for a viewer this client detached are dropped.
+    if (this.detached.has(channel)) return;
     const early = this.early.get(channel) ?? { chunks: [], bytes: 0 };
     if (this.earlyBytes + payload.length > MAX_EARLY_BYTES) {
       throw new CoreProtocolError('early_overflow', 'stream data arrived before its channel could be registered');
@@ -332,7 +338,8 @@ export class CoreClient {
   private handleStreamClose(channel: number, payload: Uint8Array): void {
     const reason = closeReason(payload);
     const stream = this.streams.get(channel);
-    this.early.delete(channel);
+    this.takeEarly(channel);
+    this.detached.delete(channel);
     this.streams.delete(channel);
     stream?.onClose(reason);
   }
@@ -397,6 +404,7 @@ export class CoreClient {
     this.closeError = err;
     this.early.clear();
     this.earlyBytes = 0;
+    this.detached.clear();
     for (const p of [...this.pending.values()]) {
       clearTimeout(p.timer);
       p.reject(err);

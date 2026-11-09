@@ -23,6 +23,15 @@ describe('CoreTerminalBuffer text and controls', () => {
     expect(buf.historyLength).toBe(MAX_HISTORY);
   });
 
+  it('keeps the newest history lines oldest-first once the bound is reached', () => {
+    const buf = new CoreTerminalBuffer(10, 1, 3);
+    feed(buf, 'a\r\nb\r\nc\r\nd\r\ne\r\nf');
+    expect(buf.historyLength).toBe(3);
+    expect(buf.allLines().map((l) => l.map((s) => s.text).join(''))).toEqual(['c', 'd', 'e', 'f']);
+    feed(buf, '\x1b[3J');
+    expect(buf.allLines().map((l) => l.map((s) => s.text).join(''))).toEqual(['f']);
+  });
+
   it('handles absolute and relative cursor movement, save/restore and erase', () => {
     const buf = new CoreTerminalBuffer(10, 4);
     feed(buf, '\x1b[2;3HX');
@@ -98,7 +107,6 @@ describe('CoreTerminalBuffer bytes and parsing', () => {
       cells: buf.screenLines().map((l) => JSON.stringify(l)),
       history: buf.historyLength,
       cursor: buf.cursor,
-      title: buf.title,
     };
   };
 
@@ -120,7 +128,7 @@ describe('CoreTerminalBuffer bytes and parsing', () => {
       expect(r.cells).toEqual(whole.cells);
       expect(r.history).toBe(whole.history);
       expect(r.cursor).toEqual(whole.cursor);
-      expect(r.title).toBe('window title');
+      expect(r.text).not.toContain('window title');
     }
   });
 

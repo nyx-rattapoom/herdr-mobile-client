@@ -396,13 +396,20 @@ export default function App() {
         if (!first) {
           const pin = await pins.get(pinHost(server), server.port);
           if (!pin) throw new Error('The host key is no longer pinned; reconnect from the server list.');
+          if (coreSession.current !== core) throw new Cancelled();
+          if (conn.current === active) conn.current = null;
           active.close();
-          active = await ServerConnection.open(
+          const next = await ServerConnection.open(
             { ...server, ...(await credentialsFor(server)) },
             pin,
             await jumpFor(server),
           );
-          conn.current = active;
+          if (coreSession.current !== core) {
+            next.close();
+            throw new Cancelled();
+          }
+          active = next;
+          conn.current = next;
         }
         first = false;
         return active.openCore(server.hcPath);

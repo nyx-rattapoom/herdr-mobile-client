@@ -181,7 +181,7 @@ describe('CoreClient requests and streams', () => {
       onClose: () => {},
     });
     expect(got).toBe('ab');
-    c.unregisterStream(9);
+    c.closeStream(9);
     c.registerStream(9, {
       onData: (b) => {
         got += decodeUtf8(b);
@@ -199,6 +199,47 @@ describe('CoreClient requests and streams', () => {
     const chunk = new Uint8Array(1024 * 1024);
     for (let i = 0; i < MAX_EARLY_BYTES / chunk.length + 1; i++) t.push(encodeFrame(5, FRAME.DATA, chunk));
     expect(errors[0]).toMatchObject({ code: 'early_overflow' });
+  });
+
+  it('drops in-flight frames for detached viewers so switching terminals never exhausts the early budget', async () => {
+    const t = new FakeByteTransport();
+    const { c } = await handshake(t);
+    const errors: Error[] = [];
+    c.onClose((e) => errors.push(e));
+    // A core keeps sending up to its 256 KiB credit window after a viewer CLOSE.
+    const window = new Uint8Array(256 * 1024);
+    const switches = MAX_EARLY_BYTES / window.length + 4;
+    for (let channel = 10; channel < 10 + switches; channel++) {
+      c.registerStream(channel, { onData: () => {}, onClose: () => {} });
+      c.closeStream(channel);
+      t.push(encodeFrame(channel, FRAME.DATA, window));
+      t.push(encodeFrame(channel, FRAME.CLOSE));
+    }
+    // A superseded attach is closed before it was ever registered.
+    c.closeStream(99);
+    t.push(encodeFrame(99, FRAME.DATA, window));
+    expect(errors).toEqual([]);
+    expect(c.closed).toBe(false);
+
+    // The whole budget is still available to a channel that registers late.
+    const full = new Uint8Array(MAX_EARLY_BYTES);
+    t.push(encodeFrame(200, FRAME.DATA, full));
+    let got = 0;
+    c.registerStream(200, { onData: (b) => (got += b.length), onClose: () => {} });
+    expect(got).toBe(MAX_EARLY_BYTES);
+    expect(errors).toEqual([]);
+  });
+
+  it('returns early bytes to the budget when the core closes an unregistered channel', async () => {
+    const t = new FakeByteTransport();
+    const { c } = await handshake(t);
+    const errors: Error[] = [];
+    c.onClose((e) => errors.push(e));
+    const chunk = new Uint8Array(MAX_EARLY_BYTES - 1);
+    t.push(encodeFrame(30, FRAME.DATA, chunk));
+    t.push(encodeFrame(30, FRAME.CLOSE));
+    t.push(encodeFrame(31, FRAME.DATA, chunk));
+    expect(errors).toEqual([]);
   });
 
   it('credits consumed stream bytes exactly and never gates viewer input on credit', async () => {

@@ -184,7 +184,8 @@ Date: 2026-11-09. Sources pinned at herdr-core `3ba03e6fc59fb974a4e2627586646f87
 - **Android implementation.** A no-PTY `ChannelExec` (`ExecStream.kt`) exposes `openExecStream`,
   `startExecStream`, `writeBytes` and `closeExecStream`. Base64 is only the JS bridge envelope; bytes are never
   UTF-8 decoded. stdout is buffered until `startExecStream`, so the attach first paint cannot race listener setup.
-  The pending queue is bounded (16 MiB), stderr is capped at 64 KiB, and exit 97 means "hc not found" rather than a
+  The pending queue is bounded (16 MiB); a consumer that falls further behind closes the stream with
+  `output queue overflow` (a hard bound, not SSH-window backpressure). stderr is capped at 64 KiB, and exit 97 means "hc not found" rather than a
   protocol loss.
 - **Attach streams.** `terminal.attach` returns a channel, then the first paint, then live bytes. The viewer sends
   keys as DATA, RESIZE/FOCUS/FACTS for viewer activity, and CLOSE to detach (never `terminal.kill`). Streams start

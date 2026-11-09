@@ -1,3 +1,8 @@
+import { execFileSync } from 'child_process';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 import { bytesToBase64, base64ToBytes, decodeUtf8, encodeUtf8, Utf8Stream, concatBytes } from '../core/bytes';
 import { CORE_EXIT_NO_HC, coreConnectCommand, explainCoreClose, explainStrayStdout } from '../core/commands';
 import {
@@ -13,7 +18,6 @@ import {
   encodeJsonFrame,
   resizeFrame,
 } from '../core/frames';
-import { CORE_PLATFORM_MESSAGE, corePlatformAvailable } from '../core/platform';
 
 describe('byte helpers', () => {
   it('round-trips every byte value through base64', () => {
@@ -38,14 +42,58 @@ describe('byte helpers', () => {
 });
 
 describe('core commands', () => {
-  it('quotes hc paths and exits 97 when hc is missing', () => {
-    const cmd = coreConnectCommand();
-    expect(cmd.startsWith("sh -c '")).toBe(true);
-    expect(cmd).toContain(`exit ${CORE_EXIT_NO_HC}`);
-    expect(cmd).toContain('exec "$H" connect');
-    expect(cmd).not.toContain('\n');
-    expect(coreConnectCommand('/opt/hc')).toContain('[ -x /opt/hc ]');
-    expect(coreConnectCommand('~/bin/hc')).toContain('"$HOME"/bin/hc');
+  // Runs the generated command with a real `sh`, as the SSH exec channel does.
+  // Fake `hc` executables print which one ran and the argv they received.
+  let root: string;
+  let home: string;
+  let pathBin: string;
+  const fakeHc = (path: string, tag: string) => {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, `#!/bin/sh\necho "${tag} $*"\n`);
+    chmodSync(path, 0o755);
+  };
+  const run = (hcPath?: string, opts: { pathHc?: boolean } = {}) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${opts.pathHc ? `${pathBin}:` : ''}/usr/bin:/bin`, HOME: home, SHELL: '' };
+    try {
+      return { code: 0, out: execFileSync('/bin/sh', ['-c', coreConnectCommand(hcPath)], { env, stdio: 'pipe' }).toString().trim() };
+    } catch (e) {
+      const err = e as { status: number; stdout: Buffer };
+      return { code: err.status, out: err.stdout.toString().trim() };
+    }
+  };
+
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'hc-cmd-')));
+    home = join(root, 'home');
+    pathBin = join(root, 'pathbin');
+    mkdirSync(home, { recursive: true });
+    fakeHc(join(pathBin, 'hc'), 'path');
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('exits 97 when hc is nowhere to be found', () => {
+    expect(run()).toEqual({ code: CORE_EXIT_NO_HC, out: '' });
+  });
+
+  it('runs `hc connect` from PATH, then ~/.local/bin', () => {
+    expect(run(undefined, { pathHc: true })).toEqual({ code: 0, out: 'path connect' });
+    fakeHc(join(home, '.local/bin/hc'), 'local');
+    expect(run()).toEqual({ code: 0, out: 'local connect' });
+  });
+
+  it('prefers an executable configured path, including ~/ paths, over PATH', () => {
+    const configured = join(root, 'opt/hc');
+    fakeHc(configured, 'configured');
+    expect(run(configured, { pathHc: true })).toEqual({ code: 0, out: 'configured connect' });
+    fakeHc(join(home, 'bin/hc'), 'home');
+    expect(run('~/bin/hc', { pathHc: true })).toEqual({ code: 0, out: 'home connect' });
+    expect(run(join(root, 'missing/hc'), { pathHc: true })).toEqual({ code: 0, out: 'path connect' });
+  });
+
+  it('refuses a stored hc path that fails validation instead of running it', () => {
+    for (const bad of ['/x;id', '/a b', '$(id)', 'hc', '/x/../y']) {
+      expect(() => coreConnectCommand(bad)).toThrow(expect.objectContaining({ code: 'hc_path_invalid' }));
+    }
   });
 
   it('explains missing/non-executable hc without falling back to legacy', () => {
@@ -54,12 +102,27 @@ describe('core commands', () => {
     expect(explainCoreClose({ reason: 'eof', exitCode: 1, stderr: 'boom' }).message).toContain('boom');
     expect(explainStrayStdout('Welcome to bash').code).toBe('hc_stdout');
   });
+});
 
-  it('gates Core to Android without touching native methods', () => {
-    expect(corePlatformAvailable('android')).toBe(true);
-    expect(corePlatformAvailable('ios')).toBe(false);
-    expect(CORE_PLATFORM_MESSAGE).toContain('Android');
-    expect(CORE_PLATFORM_MESSAGE).toContain('Herdr TUI');
+describe('frame wire format', () => {
+  // Byte vectors from herdr-core schema/README.md (pinned in docs/SPIKE.md §7):
+  // `[channel u32 LE][kind u8][len u32 LE][payload]`, CREDIT is u32 LE,
+  // RESIZE is u16 LE cols then u16 LE rows.
+  const DATA_258_HI = Uint8Array.of(0x02, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x68, 0x69);
+  const CREDIT_3_1234 = Uint8Array.of(0x03, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0xd2, 0x04, 0x00, 0x00);
+  const RESIZE_9_120x40 = Uint8Array.of(0x09, 0x00, 0x00, 0x00, 0x03, 0x04, 0x00, 0x00, 0x00, 0x78, 0x00, 0x28, 0x00);
+
+  it('encodes DATA, CREDIT and RESIZE to the documented bytes', () => {
+    expect(encodeFrame(258, FRAME.DATA, encodeUtf8('hi'))).toEqual(DATA_258_HI);
+    expect(creditFrame(3, 1234)).toEqual(CREDIT_3_1234);
+    expect(resizeFrame(9, 120, 40)).toEqual(RESIZE_9_120x40);
+  });
+
+  it('decodes the documented bytes', () => {
+    const [data, credit, resize] = new FrameParser().push(concatBytes(DATA_258_HI, CREDIT_3_1234, RESIZE_9_120x40));
+    expect([data.channel, data.kind, decodeUtf8(data.payload)]).toEqual([258, FRAME.DATA, 'hi']);
+    expect([credit.channel, credit.kind, decodeCredit(credit.payload)]).toEqual([3, FRAME.CREDIT, 1234]);
+    expect([resize.channel, resize.kind, decodeResize(resize.payload)]).toEqual([9, FRAME.RESIZE, { cols: 120, rows: 40 }]);
   });
 });
 

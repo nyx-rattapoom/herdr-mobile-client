@@ -428,8 +428,9 @@ saved Core profile on iOS is gated before any native call.
   both `herdrPath` and `hcPath` and never clones or moves the saved password. `ServerFormScreen` shows the selector
   and the `hc` field; `ServersScreen` labels each row.
 - `modules/herdr-ssh` (Android): `ExecStream.kt` is a long-lived no-PTY `ChannelExec` with bounded stdout
-  (16 MiB pending, stop-and-wait backpressure), capped stderr (64 KiB), a start gate so early stdout is not lost,
-  and an EOF sentinel that lets queued bytes drain before `onChannelClosed`. New events are separate from the legacy
+  (16 MiB pending; a consumer that falls further behind closes the stream with `output queue overflow`, there is no
+  SSH-window backpressure), capped stderr (64 KiB), a start gate so early stdout is not lost, an EOF sentinel that
+  lets queued bytes drain before `onChannelClosed`, and a close that wakes and ends the worker tasks. New events are separate from the legacy
   text events: `onChannelBytes` (base64 envelope only) and `onChannelClosed`.
 - `src/core/`: independent protocol and state (`bytes`, `frames`, `types`, `commands`, `transport`, `client`,
   `events`, `layout`, `labels`, `terminalBuffer`, `platform`, `CorePane`, `CoreSession`). `CoreClient` validates the

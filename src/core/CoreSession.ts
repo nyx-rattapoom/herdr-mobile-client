@@ -131,72 +131,41 @@ export class CoreSession {
     const terminals = new Map<string, CoreTerminal>();
     for (const t of sub.terminals) terminals.set(t.address, t);
     this.state = { seq: sub.seq, terminals };
-    if (sub.channel !== null) {
-      const lines = new ByteLineBuffer();
-      client.registerStream(sub.channel, {
-        onData: (bytes) => {
-          if (gen !== this.generation) return;
-          for (const line of lines.push(bytes)) {
-            let msg: unknown;
-            try {
-              msg = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            const m = msg as { method?: unknown; params?: unknown };
-            if (typeof m.method !== 'string') continue;
-            const params = typeof m.params === 'object' && m.params !== null ? (m.params as Record<string, unknown>) : {};
-            this.handleNotification(m.method, params);
-          }
-        },
-        onClose: () => {
-          if (gen !== this.generation || this.closedByUser) return;
-          if (this.client?.closed) return;
-          // The terminal streams can survive an event-channel loss, but the
-          // snapshot is authoritative: subscribe again and re-read documents.
-          void this.resubscribe(gen);
-        },
-      });
-    }
+    if (sub.channel !== null) this.registerEvents(gen, client, sub.channel);
     this.emit();
     await this.readDoc(gen);
   }
 
-  private async resubscribe(gen: number): Promise<void> {
-    const client = this.client;
-    if (!client || gen !== this.generation) return;
+  private registerEvents(gen: number, client: CoreClient, channel: number): void {
+    const lines = new ByteLineBuffer();
+    client.registerStream(channel, {
+      onData: (bytes) => {
+        if (gen !== this.generation) return;
+        for (const line of lines.push(bytes)) {
+          let msg: unknown;
+          try {
+            msg = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          const m = msg as { method?: unknown; params?: unknown };
+          if (typeof m.method !== 'string') continue;
+          const params = typeof m.params === 'object' && m.params !== null ? (m.params as Record<string, unknown>) : {};
+          this.handleNotification(m.method, params);
+        }
+      },
+      onClose: () => {
+        if (gen !== this.generation || this.closedByUser || client.closed) return;
+        // The terminal streams can survive an event-channel loss, but the
+        // snapshot is authoritative: subscribe again and re-read documents.
+        void this.resubscribe(gen, client);
+      },
+    });
+  }
+
+  private async resubscribe(gen: number, client: CoreClient): Promise<void> {
     try {
-      const raw = await client.request('events.subscribe', {}, 20_000);
-      if (gen !== this.generation) return;
-      const sub = parseSubscribe(raw);
-      const terminals = new Map<string, CoreTerminal>();
-      for (const t of sub.terminals) terminals.set(t.address, t);
-      this.state = { seq: sub.seq, terminals };
-      if (sub.channel !== null) {
-        const lines = new ByteLineBuffer();
-        client.registerStream(sub.channel, {
-          onData: (bytes) => {
-            if (gen !== this.generation) return;
-            for (const line of lines.push(bytes)) {
-              let msg: unknown;
-              try {
-                msg = JSON.parse(line);
-              } catch {
-                continue;
-              }
-              const m = msg as { method?: unknown; params?: unknown };
-              if (typeof m.method !== 'string') continue;
-              const params = typeof m.params === 'object' && m.params !== null ? (m.params as Record<string, unknown>) : {};
-              this.handleNotification(m.method, params);
-            }
-          },
-          onClose: () => {
-            /* the reconnect path owns recovery from a repeated loss */
-          },
-        });
-      }
-      this.emit();
-      await this.readDoc(gen);
+      await this.subscribeAndRead(gen, client);
     } catch (e) {
       if (gen !== this.generation) return;
       this.error = e instanceof Error ? e.message : String(e);
