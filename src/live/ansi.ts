@@ -31,7 +31,7 @@ export function color256(n: number): string | undefined {
   return `#${hex(g)}${hex(g)}${hex(g)}`;
 }
 
-function applySgr(style: Style, params: number[]): Style {
+export function applySgr(style: Style, params: number[]): Style {
   let s = { ...style };
   if (params.length === 0) params = [0];
   for (let i = 0; i < params.length; i++) {

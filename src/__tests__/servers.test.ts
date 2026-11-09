@@ -1,12 +1,15 @@
 import {
   MAX_HOPS,
   ServerStore,
+  backendOf,
   dependentsOf,
   endpointInUse,
+  isCoreProfile,
   jumpCandidates,
   jumpChain,
   jumpOptions,
   routeLabel,
+  validateBackend,
   validateJump,
   validateServer,
 } from '../store/servers';
@@ -187,5 +190,56 @@ describe('jump hosts', () => {
     await store.update(b.id, { ...base, label: 'B' });
     expect((await store.list()).find((s) => s.id === 'b')?.jumpId).toBeUndefined();
     await store.remove(a.id);
+  });
+});
+
+describe('backend selection', () => {
+  it('treats missing and unknown stored backends as the original Herdr TUI', async () => {
+    const kv = new MemoryKv();
+    kv.map.set('servers.v1', JSON.stringify([{ id: 'old', label: 'old', host: 'h', port: 22, username: 'u', auth: 'key' }]));
+    const store = new ServerStore(kv);
+    const [old] = await store.list();
+    expect(backendOf(old)).toBe('legacy');
+    expect(isCoreProfile(old)).toBe(false);
+    expect(backendOf({ backend: 'future' } as never)).toBe('legacy');
+    expect(validateBackend(undefined)).toBeNull();
+    expect(validateBackend('legacy')).toBeNull();
+    expect(validateBackend('core')).toBeNull();
+    expect(validateBackend('future')).toMatch(/Backend/);
+  });
+
+  it('persists an explicit Core profile and keeps both executable paths independent when toggled', async () => {
+    const secrets = new MemoryKv();
+    const store = new ServerStore(new MemoryKv(), () => 'c1', secrets);
+    const core = await store.add({ ...base, backend: 'core', herdrPath: '~/bin/herdr', hcPath: '~/bin/hc' });
+    expect(core).toMatchObject({ backend: 'core', herdrPath: '~/bin/herdr', hcPath: '~/bin/hc' });
+    expect(await store.password('c1')).toBe('pw');
+
+    const legacy = await store.update('c1', { ...base, backend: 'legacy', herdrPath: '~/bin/herdr', hcPath: '~/bin/hc', password: '' });
+    expect(legacy.backend).toBeUndefined();
+    expect(legacy).toMatchObject({ herdrPath: '~/bin/herdr', hcPath: '~/bin/hc' });
+    expect(await store.password('c1')).toBe('pw');
+
+    const again = await store.update('c1', { ...base, backend: 'core', herdrPath: '~/bin/herdr2', hcPath: '~/bin/hc2', password: '' });
+    expect(again).toMatchObject({ backend: 'core', herdrPath: '~/bin/herdr2', hcPath: '~/bin/hc2' });
+  });
+
+  it('does not write an empty hcPath or backend, keeping old profile shape stable', async () => {
+    const store = new ServerStore(new MemoryKv(), () => 'p1');
+    const p = await store.add({ ...base, backend: 'legacy', hcPath: '  ' });
+    expect(p).not.toHaveProperty('backend');
+    expect(p).not.toHaveProperty('hcPath');
+  });
+
+  it('rejects invalid backend and hc paths, including shell syntax and traversal', async () => {
+    expect(validateServer({ ...base, backend: 'future' } as never)).toMatch(/Backend/);
+    expect(validateServer({ ...base, hcPath: 'hc' })).toMatch(/hc path/);
+    expect(validateServer({ ...base, hcPath: '/x;id' })).toMatch(/hc path/);
+    expect(validateServer({ ...base, hcPath: '/x$(id)' })).toMatch(/hc path/);
+    expect(validateServer({ ...base, hcPath: '/x`id`' })).toMatch(/hc path/);
+    expect(validateServer({ ...base, hcPath: '/x/../y' })).toMatch(/hc path/);
+    expect(validateServer({ ...base, hcPath: '~/bin/hc' })).toBeNull();
+    const store = new ServerStore(new MemoryKv(), () => 'x');
+    await expect(store.add({ ...base, backend: 'core', hcPath: '/x;id' })).rejects.toThrow(/hc path/);
   });
 });

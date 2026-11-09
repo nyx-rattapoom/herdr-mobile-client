@@ -12,6 +12,9 @@ SSH module (see [docs/SPIKE.md](docs/SPIKE.md) §6 for what differs). Per-milest
 
 - SSH straight to Herdr's socket (direct-streamlocal). Nothing is uploaded to the server. The host key is shown and
   pinned before any credential is sent, and a mismatch blocks the connection.
+- Optional per-server **Herdr Core** backend next to the default **Herdr TUI** backend. Core speaks `hc connect`
+  over SSH (binary-framed) and needs `hc` on the server; the app never installs or upgrades it and never falls back
+  to TUI. Core is Android-first; iOS keeps its existing TUI path and gates Core profiles with an explanation.
 - Jump hosts (like `ssh -J`): a server can hop through another saved server, which can itself hop through another
   (up to 8 hops), e.g. phone → office gateway → Pi → box on the Pi's LAN. Each hop uses its own password or device
   key, its host key is pinned separately, and each jump host only relays the encrypted session to the next.
@@ -22,6 +25,11 @@ SSH module (see [docs/SPIKE.md](docs/SPIKE.md) §6 for what differs). Per-milest
 - Agent status and local notifications when an agent is blocked or finishes, kept alive in the background by a
   foreground service on Android (limits are in PROGRESS.md). iOS only gets a short grace period in the background.
 - Installs Herdr with the official installer when it's missing, or starts its server.
+
+For Herdr Core, install the herdr-core package on the server so `hc` is on the login `PATH` (or set the profile's
+`hc` path). A Core profile can share an endpoint with a TUI profile; each has its own executable path and backend.
+Core support in this version is Android-only; see [docs/PROGRESS.md](docs/PROGRESS.md) for the tested and untested
+parts.
 
 Future: paired-device mode (M6).
 

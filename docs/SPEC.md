@@ -13,8 +13,28 @@ Status: plan approved 2026-10-13. Decisions: **SSH direct to Herdr socket (no se
 8. Show per-agent status (working / blocked / completed); local notification when an agent becomes blocked or completes.
 9. Credentials in Android Keystore / iOS Keychain; optional biometric unlock.
 10. Optional later: paired-device mode for persistent access.
+11. Optional per-server backend: **Herdr TUI** (the existing socket API, default for every existing profile) or
+    **Herdr Core** (`hc connect` over SSH, explicit opt-in). A missing backend field means Herdr TUI; the app never
+    falls back from Core to TUI.
 
 Non-goals: unsigned OTA code updates; password-only auth; uploading binaries to the server.
+
+## Herdr Core backend (Android first)
+
+Herdr Core is a separate protocol and transport, not a drop-in replacement for the desktop TUI socket API:
+
+- The app runs `hc connect` as a no-PTY exec channel (Android: `openExecStream` in `modules/herdr-ssh`). The
+  wire is binary-framed after a plain hello, so it never goes through the legacy UTF-8 text channel.
+- The phone keeps a read-only view of the desktop `herdr-app` document (spaces → tabs → terminals). Core v1 only
+  calls `doc.get`; it never writes layout/focus.
+- Shared `herdr.seen` / `herdr.pinned` labels follow the documented semantics: `seen` is raise-only (missing is not
+  zero), unpin writes an empty value, and mark-unread may lower it once. Navigation, focus, scroll and drafts stay
+  local to the phone.
+- Android is the first delivery. iOS keeps its existing Herdr TUI path; selecting Core or opening a saved Core
+  profile on iOS shows an Android-only explanation *before* any native Core call. iOS native Core transport is a
+  follow-up.
+- `hc` is a server prerequisite (the herdr-core package). The app never installs or upgrades it, and a missing `hc`
+  is an explicit error, never a silent backend switch.
 
 ## Architecture (to be confirmed by clean side from public sources)
 - Expo React Native app, Android first; native SSH module.

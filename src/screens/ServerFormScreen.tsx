@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { shortKey } from '../store/deviceKey';
-import { authOf, validateServer, type AuthMethod, type JumpOption, type ServerInput, type ServerProfile } from '../store/servers';
+import { authOf, backendOf, validateServer, type AuthMethod, type BackendKind, type JumpOption, type ServerInput, type ServerProfile } from '../store/servers';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
@@ -26,12 +26,15 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
   const [password, setPassword] = useState('');
   const [clearPassword, setClearPassword] = useState(false);
   const [herdrPath, setHerdrPath] = useState(initial?.herdrPath ?? '');
+  const [backend, setBackend] = useState<BackendKind>(initial ? backendOf(initial) : 'legacy');
+  const [hcPath, setHcPath] = useState(initial?.hcPath ?? '');
   const [jumpId, setJumpId] = useState<string | undefined>(initial?.jumpId);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const canCore = Platform.OS === 'android';
 
   const save = async () => {
-    const input: ServerInput = { label, host, port: Number(port), username, auth, password, herdrPath, jumpId };
+    const input: ServerInput = { label, host, port: Number(port), username, auth, password, herdrPath, backend, hcPath, jumpId };
     const err = validateServer(input, { hasSavedPassword: hasSavedPassword && !clearPassword });
     if (err) return setError(err);
     setSaving(true);
@@ -106,6 +109,38 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
         {field('port', 'Port', port, setPort, { keyboardType: 'number-pad' })}
         {field('user', 'User', username, setUsername)}
 
+        <Text style={styles.label}>Server type</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {(['legacy', 'core'] as BackendKind[]).map((m) => {
+            const on = backend === m;
+            const disabled = m === 'core' && !canCore;
+            return (
+              <Pressable
+                key={m}
+                testID={`backend-${m}`}
+                accessibilityRole="button"
+                disabled={disabled}
+                onPress={() => setBackend(m)}
+                style={[
+                  styles.card,
+                  { flex: 1, paddingVertical: 10, borderColor: on ? colors.accent : colors.border, opacity: disabled ? 0.5 : 1 },
+                ]}
+              >
+                <Text style={[styles.text, { textAlign: 'center', color: on ? colors.accent : colors.text }]}>
+                  {m === 'legacy' ? 'Herdr TUI' : 'Herdr Core'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.muted}>
+          {backend === 'core'
+            ? canCore
+              ? 'Herdr Core streams terminal output over `hc connect` and shares seen/pin state with the desktop.'
+              : 'Herdr Core is Android-only for now. This profile will not connect on iOS; choose Herdr TUI to use it here.'
+            : 'Herdr TUI uses the existing Herdr socket and polling. This stays the default for new and existing profiles.'}
+        </Text>
+
         <Text style={styles.label}>Authentication</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {(['key', 'password'] as AuthMethod[]).map((m) => (
@@ -148,6 +183,15 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
         ) : null}
 
         {field('herdr', 'Herdr path on server (optional)', herdrPath, setHerdrPath, { placeholder: '~/.local/bin/herdr' })}
+        {backend === 'core' ? (
+          <View>
+            {field('hc', 'hc path on server (optional)', hcPath, setHcPath, { placeholder: '~/.local/bin/hc' })}
+            <Text style={styles.muted}>
+              Herdr Core needs `hc` on the server (the herdr-core package). The app runs `hc connect` over SSH; it never
+              installs or upgrades hc. Herdr TUI keeps its own path above, so switching back does not lose either one.
+            </Text>
+          </View>
+        ) : null}
         <Text style={styles.muted}>
           Only needed if herdr is not on the login shell&apos;s PATH. Credentials are kept in{' '}
           {Platform.OS === 'ios' ? 'the iOS Keychain' : 'Android Keystore-backed storage'} and are only sent after the

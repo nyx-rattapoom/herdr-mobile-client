@@ -1,6 +1,6 @@
 import { FlatList, Pressable, Text, View } from 'react-native';
 
-import { authOf, type ServerProfile } from '../store/servers';
+import { authOf, backendOf, type ServerProfile } from '../store/servers';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
 
 type Props = {
@@ -42,6 +42,8 @@ export function ServersScreen({ servers, jumpLabel, error, onAdd, onOpen, onMana
               <Text style={styles.muted}>
                 {item.username}@{item.host}:{item.port}
                 {item.jumpId ? ` via ${jumpLabel(item) ?? 'missing server'}` : ''} · {authOf(item) === 'key' ? 'device key' : 'password'}
+                {' · '}
+                {backendOf(item) === 'core' ? 'Herdr Core' : 'Herdr TUI'}
               </Text>
             </Pressable>
           )}

@@ -3,6 +3,7 @@ package expo.modules.herdrssh
 import android.util.Base64
 import android.view.WindowManager
 import com.jcraft.jsch.ChannelDirectStreamLocal
+import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
 import com.jcraft.jsch.JSchException
@@ -42,12 +43,13 @@ class HerdrSshModule : Module() {
   private val watchdog = Executors.newSingleThreadScheduledExecutor()
   private val sessions = ConcurrentHashMap<String, Session>()
   private val channels = ConcurrentHashMap<String, StreamChannel>()
+  private val execStreams = ConcurrentHashMap<String, ExecStream>()
   private var keepAliveTask: Int? = null
 
   override fun definition() = ModuleDefinition {
     Name("HerdrSsh")
 
-    Events("onChannelData", "onChannelClose")
+    Events("onChannelData", "onChannelClose", "onChannelBytes", "onChannelClosed")
 
     AsyncFunction("probeHostKey") { host: String, port: Int, viaSessionId: String?, promise: Promise ->
       run(promise) {
@@ -168,11 +170,62 @@ class HerdrSshModule : Module() {
       }
     }
 
+    AsyncFunction("openExecStream") { sessionId: String, command: String, promise: Promise ->
+      run(promise) {
+        val session = requireSession(sessionId)
+        val channel = session.openChannel("exec") as ChannelExec
+        channel.setPty(false)
+        channel.setCommand(command)
+        try {
+          channel.connect(CHANNEL_TIMEOUT_MS)
+        } catch (e: JSchException) {
+          channel.disconnect()
+          throw SshError("ERR_EXEC", e.message ?: "exec channel open failed", e)
+        }
+        val id = UUID.randomUUID().toString()
+        val stream = ExecStream(
+          id,
+          sessionId,
+          channel,
+          emitBytes = ::emitBytes,
+          emitClosed = ::emitClosed,
+        )
+        execStreams[id] = stream
+        id
+      }
+    }
+
+    Function("startExecStream") { channelId: String ->
+      execStreams[channelId]?.start(io)
+      null
+    }
+
+    AsyncFunction("writeBytes") { channelId: String, data: String, promise: Promise ->
+      run(promise) {
+        val stream = execStreams[channelId] ?: throw SshError("ERR_NO_CHANNEL", "stream is closed")
+        val bytes = try {
+          Base64.decode(data, Base64.NO_WRAP)
+        } catch (e: IllegalArgumentException) {
+          throw SshError("ERR_ARGS", "invalid byte payload", e)
+        }
+        stream.write(bytes)
+        null
+      }
+    }
+
+    Function("closeExecStream") { channelId: String ->
+      execStreams.remove(channelId)?.close("closed")
+      null
+    }
+
     Function("closeChannel") { channelId: String ->
       channels.remove(channelId)?.channel?.disconnect()
     }
 
     Function("disconnect") { sessionId: String ->
+      execStreams.entries.filter { it.value.sessionId == sessionId }.forEach { (id, stream) ->
+        if (execStreams.remove(id) != null) stream.close("session closed")
+      }
       sessions.remove(sessionId)?.disconnect()
     }
 
@@ -198,6 +251,8 @@ class HerdrSshModule : Module() {
     OnDestroy {
       appContext.reactContext?.let { MonitorService.stop(it) }
       holdTimers(false)
+      execStreams.values.forEach { it.close("module destroyed") }
+      execStreams.clear()
       channels.values.forEach { it.channel.disconnect() }
       sessions.values.forEach { it.disconnect() }
       io.shutdownNow()
@@ -297,6 +352,21 @@ class HerdrSshModule : Module() {
     } catch (e: IllegalArgumentException) {
       throw SshError("ERR_ARGS", "invalid pinned key", e)
     }
+
+  private fun emitBytes(channelId: String, bytes: ByteArray) {
+    sendEvent(
+      "onChannelBytes",
+      mapOf("channelId" to channelId, "data" to Base64.encodeToString(bytes, Base64.NO_WRAP)),
+    )
+  }
+
+  private fun emitClosed(channelId: String, reason: String, exitCode: Int?, stderr: String) {
+    execStreams.remove(channelId)
+    sendEvent(
+      "onChannelClosed",
+      mapOf("channelId" to channelId, "reason" to reason, "exitCode" to exitCode, "stderr" to stderr),
+    )
+  }
 
   private fun hostKeyInfo(key: ByteArray): Map<String, String> = mapOf(
     "algorithm" to HostKeys.algorithm(key),

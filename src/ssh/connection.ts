@@ -1,5 +1,6 @@
 import HerdrSsh from '../../modules/herdr-ssh';
 import { HerdrClient } from '../protocol/client';
+import { NativeCoreTransport, type ByteTransport } from '../core/transport';
 import {
   discoveryCommand,
   versionCommand,
@@ -145,6 +146,11 @@ export class ServerConnection {
       throw await this.explainOpenFailure(e, socketPath);
     }
     return new HerdrClient(new SshSocketTransport(channelId));
+  }
+
+  /** Herdr Core over `hc connect` on this already-authenticated, pinned route. */
+  openCore(hcPath?: string): Promise<ByteTransport> {
+    return NativeCoreTransport.open(this.sessionId, hcPath);
   }
 
   private async explainOpenFailure(e: unknown, socketPath: string): Promise<unknown> {

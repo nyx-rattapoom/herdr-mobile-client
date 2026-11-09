@@ -170,3 +170,33 @@ Platform differences:
 Native test: `HERDR_TEST_SSH=herdr:herdr-test@127.0.0.1:2222 HERDR_TEST_NOFWD=127.0.0.1:2223
 modules/herdr-ssh/ios/tests/run.sh` builds the same Swift core plus libssh2 for macOS and runs the
 probe/pin/auth/exec/socket/key/jump/multi-hop cases against the Docker servers.
+
+## 7. Herdr Core transport (protocol generation 1)
+
+Date: 2026-11-09. Sources pinned at herdr-core `3ba03e6fc59fb974a4e2627586646f87ebbaf2ee`:
+`schema/README.md`, `hc.openrpc.json`, `docs/labels.md`, and the event producers in `crates/herdr-core/src/events.rs`,
+`runtime.rs`, `viewers.rs`, `foreground.rs`, and `api.rs`.
+
+- **Transport.** `ssh box hc connect` speaks JSON-RPC 2.0, one line per message, until `hello {generation:1,
+  framed:true}`. After that reply the same connection switches to frames
+  `[channel u32 LE][kind u8][len u32 LE][payload]` (≤ 16 MiB). Channel 0 carries JSON-RPC; one JSON message per
+  DATA frame (no newline needed). Other channels carry raw terminal bytes.
+- **Android implementation.** A no-PTY `ChannelExec` (`ExecStream.kt`) exposes `openExecStream`,
+  `startExecStream`, `writeBytes` and `closeExecStream`. Base64 is only the JS bridge envelope; bytes are never
+  UTF-8 decoded. stdout is buffered until `startExecStream`, so the attach first paint cannot race listener setup.
+  The pending queue is bounded (16 MiB), stderr is capped at 64 KiB, and exit 97 means "hc not found" rather than a
+  protocol loss.
+- **Attach streams.** `terminal.attach` returns a channel, then the first paint, then live bytes. The viewer sends
+  keys as DATA, RESIZE/FOCUS/FACTS for viewer activity, and CLOSE to detach (never `terminal.kill`). Streams start
+  with 256 KiB credit; CREDIT reports consumed bytes. A stream also requests `resize_notifications:true`, and the
+  reply is honored only when confirmed.
+- **Events.** `events.subscribe` returns `{seq, terminals, channel}` and notifications arrive as JSON lines:
+  `event` (`created`, `restarted`, `lost`, `finished`, `removed`, `keep`, `status`, `turn`, `title`, `labels`,
+  `size`, `foreground`, `doc`), `heartbeat {seq}`, and `missed {seq, terminals}`. The client resnapshots on
+  `missed`/reconnect and reads documents after subscribe, `missed`, docs events and reconnects.
+- **Shared state.** `herdr.seen=<turn>` is raise-only; a missing label means "use local seen", not turn 0.
+  Unpin writes `herdr.pinned=""`; pin writes `herdr.pinned=1`. No bulk upload of local pins happens.
+- **Layout.** The `herdr-app` document is read only (`doc.get`): spaces → tabs → nodes (block/row/column/stack,
+  optional floating blocks). Unknown content is ignored and never written back.
+- **iOS.** Core transport is deliberately absent in this delivery. The Swift module keeps its existing Herdr TUI
+  API, so a saved Core profile is gated in the UI/JS before any native call.

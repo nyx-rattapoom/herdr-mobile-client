@@ -15,6 +15,13 @@ declare class HerdrSshModule extends NativeModule<HerdrSshEvents> {
   generateEd25519(comment: string): Promise<GeneratedKey>;
   exec(sessionId: string, command: string, timeoutMs?: number): Promise<ExecResult>;
   openSocket(sessionId: string, socketPath: string): Promise<string>;
+  /** Android only until the iOS Core follow-up: a long-lived no-PTY exec channel. */
+  openExecStream(sessionId: string, command: string): Promise<string>;
+  /** Starts byte delivery after the JS consumer has installed its listeners. */
+  startExecStream(channelId: string): void;
+  /** Base64 is the bridge envelope only; frame bytes are never text-decoded. */
+  writeBytes(channelId: string, data: string): Promise<void>;
+  closeExecStream(channelId: string): void;
   write(channelId: string, data: string): Promise<void>;
   closeChannel(channelId: string): void;
   disconnect(sessionId: string): void;
