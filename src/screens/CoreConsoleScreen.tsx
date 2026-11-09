@@ -118,7 +118,7 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
             label={pinned ? 'Unpin' : 'Pin'}
             onPress={() => void togglePin(session, t)}
           />
-          {seenMarkUnread(t) !== null ? <SmallButton label="Mark unread" onPress={() => void session.markUnread(t.address)} /> : null}
+          {seenMarkUnread(t) !== null ? <SmallButton label="Mark unread" onPress={() => void markUnread(session, t)} /> : null}
         </View>
       </Pressable>
     );
@@ -185,6 +185,14 @@ async function togglePin(session: CoreSession, t: CoreTerminal): Promise<void> {
     await session.setPinned(t.address, !isPinned(t));
   } catch (e) {
     Alert.alert('Pin failed', e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function markUnread(session: CoreSession, t: CoreTerminal): Promise<void> {
+  try {
+    await session.markUnread(t.address);
+  } catch (e) {
+    Alert.alert('Mark unread failed', e instanceof Error ? e.message : String(e));
   }
 }
 

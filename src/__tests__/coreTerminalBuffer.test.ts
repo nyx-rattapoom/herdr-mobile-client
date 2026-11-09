@@ -178,6 +178,29 @@ describe('CoreTerminalBuffer bytes and parsing', () => {
     expect(text(buf).includes('\u0000')).toBe(false);
   });
 
+  it('treats 8-bit NEL as CR+LF and 8-bit RI as reverse index (ECMA-48)', () => {
+    const nel = new CoreTerminalBuffer(10, 3);
+    feed(nel, 'ab\u0085cd');
+    expect(text(nel).split('\n')).toEqual(['ab', 'cd']);
+    const ri = new CoreTerminalBuffer(10, 3);
+    feed(ri, 'a\r\nb\x1b[H\u008dx');
+    expect(text(ri).split('\n')).toEqual(['x', 'a', 'b']);
+  });
+
+  it('keeps a wide glyph whole on a rows-only resize and drops it only when the edge cuts it', () => {
+    const buf = new CoreTerminalBuffer(10, 2);
+    feed(buf, '\x1b[1;9H中');
+    buf.resize(10, 4);
+    expect(text(buf)).toBe('        中');
+    // Overwriting the second half of the glyph must clear the whole glyph.
+    feed(buf, '\x1b[1;10HZ');
+    expect(text(buf)).toBe('         Z');
+    const cut = new CoreTerminalBuffer(10, 2);
+    feed(cut, '\x1b[1;9H中');
+    cut.resize(9, 2);
+    expect(text(cut)).toBe('');
+  });
+
   it('resizes by cropping and padding without reflow', () => {
     const buf = new CoreTerminalBuffer(10, 3);
     feed(buf, 'abcdefghij\r\nklm');

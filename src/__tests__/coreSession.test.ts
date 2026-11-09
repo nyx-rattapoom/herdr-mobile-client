@@ -120,6 +120,28 @@ describe('CoreSession events and documents', () => {
 });
 
 describe('CoreSession shared state and input', () => {
+  it('raises herdr.seen for a visible terminal when a snapshot brings a newer turn', async () => {
+    const { t, core, session } = await setup();
+    session.setVisible('t7');
+    await flush();
+    expect(core.labelWrites).toEqual([{ 'herdr.seen': '1' }]);
+
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 30, terminals: [coreRecord('t7', { turn: 2, labels: { 'herdr.seen': '1' } })] } });
+    await flush();
+    expect(core.labelWrites[1]).toEqual({ 'herdr.seen': '2' });
+
+    core.terminals.set('t7', coreRecord('t7', { turn: 3, labels: { 'herdr.seen': '2' } }));
+    t.push(encodeFrame(2, FRAME.CLOSE));
+    await flush();
+    expect(core.labelWrites[2]).toEqual({ 'herdr.seen': '3' });
+
+    // A later snapshot carrying another client's mark-unread for the same turn keeps it.
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 40, terminals: [coreRecord('t7', { turn: 3, labels: { 'herdr.seen': '2' } })] } });
+    await flush();
+    expect(core.labelWrites).toHaveLength(3);
+    session.close();
+  });
+
   it('raises herdr.seen once per turn while the terminal is visible', async () => {
     const { t, core, session } = await setup();
     session.setVisible('t7');

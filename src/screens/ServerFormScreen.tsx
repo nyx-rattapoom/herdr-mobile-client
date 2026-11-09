@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import { corePlatformAvailable } from '../core/platform';
 import { shortKey } from '../store/deviceKey';
 import { authOf, backendOf, validateServer, type AuthMethod, type BackendKind, type JumpOption, type ServerInput, type ServerProfile } from '../store/servers';
 import { Button, ErrorBox, Header, colors, styles } from './ui';
@@ -31,7 +32,7 @@ export function ServerFormScreen({ initial, initialRoute, hasSavedPassword, devi
   const [jumpId, setJumpId] = useState<string | undefined>(initial?.jumpId);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const canCore = Platform.OS === 'android';
+  const canCore = corePlatformAvailable();
 
   const save = async () => {
     const input: ServerInput = { label, host, port: Number(port), username, auth, password, herdrPath, backend, hcPath, jumpId };

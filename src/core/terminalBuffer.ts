@@ -189,8 +189,9 @@ export class CoreTerminalBuffer {
       return;
     }
     if (cp >= 0x80 && cp <= 0x9f) {
+      if (cp === 0x85) this.col = 0;
       if (cp === 0x84 || cp === 0x85) this.lineFeed();
-      if (cp === 0x8d) this.row = Math.min(this.bottom, this.row + 1);
+      if (cp === 0x8d) this.reverseIndex();
       return;
     }
     this.print(ch);
@@ -744,7 +745,7 @@ function resizeGrid(cells: Cell[][], oldCols: number, oldRows: number, cols: num
     const copyCols = Math.min(cols, oldCols);
     for (let x = 0; x < copyCols; x++) next[y][x] = clone(cells[y][x]);
     // A wide glyph cut by the new right edge cannot keep half a cell.
-    if (copyCols > 0 && (next[y][copyCols - 1].w === 2 || next[y][copyCols - 1].w === 0)) {
+    if (copyCols < oldCols && next[y][copyCols - 1].w === 2) {
       next[y][copyCols - 1] = blank();
     }
   }

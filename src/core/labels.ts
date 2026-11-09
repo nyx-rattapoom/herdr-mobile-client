@@ -47,12 +47,12 @@ export function seenRaise(t: CoreTerminal, written: number | null): number | nul
 }
 
 /**
- * Explicit "mark unread": the one lower write, only for a terminal whose
+ * Explicit "mark unread": the one lower write, only for a live terminal whose
  * latest turn was seen. Unread terminals and turn 0 have nothing to mark.
  */
 export function seenMarkUnread(t: CoreTerminal): number | null {
   const seen = seenOf(t);
-  return t.turn > 0 && seen !== null && seen >= t.turn ? t.turn - 1 : null;
+  return t.state === 'live' && t.turn > 0 && seen !== null && seen >= t.turn ? t.turn - 1 : null;
 }
 
 export function pinnedLabels(pinned: boolean): Record<string, string> {

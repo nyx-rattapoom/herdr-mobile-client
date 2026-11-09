@@ -121,6 +121,7 @@ export class CoreSession {
     this.status = 'live';
     this.error = null;
     this.emit();
+    this.maybeMarkSeen();
     await this.reattachPanes(gen);
   }
 
@@ -133,6 +134,7 @@ export class CoreSession {
     this.state = { seq: sub.seq, terminals };
     if (sub.channel !== null) this.registerEvents(gen, client, sub.channel);
     this.emit();
+    this.maybeMarkSeen();
     await this.readDoc(gen);
   }
 
@@ -190,6 +192,7 @@ export class CoreSession {
     if (r.missed) {
       this.docError = null;
       this.scheduleDocRead();
+      this.maybeMarkSeen();
     }
     if (r.docs.length) this.scheduleDocRead();
     // "Decide on the turn event": status/labels/size/foreground changes must

@@ -67,6 +67,7 @@ describe('shared seen label', () => {
     const marked = terminal({ status: { state: 'done' }, turn: 4, labels: { 'herdr.seen': '3' } });
     expect(attentionOf(marked)).toBe('done');
     expect(seenMarkUnread(marked)).toBeNull();
+    expect(seenMarkUnread(terminal({ state: 'finished', turn: 3, labels: { 'herdr.seen': '3' } }))).toBeNull();
   });
 });
 
