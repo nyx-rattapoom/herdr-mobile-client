@@ -6,6 +6,8 @@ import { parseLayout, type CoreLayout } from './layout';
 import { parseDocGet, parseSubscribe, parseTerminal, safeUint, CoreCommandError, type CoreTerminal } from './types';
 import type { ByteTransport } from './transport';
 
+type TransientError = 'subscribe' | 'event' | 'label' | 'reattach';
+
 export type CoreSessionStatus = 'connecting' | 'live' | 'reconnecting' | 'error' | 'closed';
 
 export type CoreSessionSnapshot = {
@@ -39,6 +41,7 @@ export class CoreSession {
   private docScheduled = false;
   private status: CoreSessionStatus = 'connecting';
   private error: string | null = null;
+  private errorSource: TransientError | null = null;
   private hello: import('./types').CoreHello | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly panes = new Set<CorePane>();
@@ -79,14 +82,14 @@ export class CoreSession {
     const gen = ++this.generation;
     this.closedByUser = false;
     this.status = 'connecting';
-    this.error = null;
+    this.resetError();
     this.emit();
     try {
       await this.connect(gen);
     } catch (e) {
       if (gen !== this.generation) return;
       this.status = 'error';
-      this.error = e instanceof Error ? e.message : String(e);
+      this.setError(e, null);
       this.emit();
       throw e;
     }
@@ -107,7 +110,7 @@ export class CoreSession {
     client.onClose((err) => {
       if (gen !== this.generation || this.closedByUser) return;
       this.status = 'error';
-      this.error = err.message;
+      this.setError(err, null);
       this.emit();
     });
     const hello = await client.handshake();
@@ -119,7 +122,7 @@ export class CoreSession {
     await this.subscribeAndRead(gen, client);
     if (gen !== this.generation) return;
     this.status = 'live';
-    this.error = null;
+    this.resetError();
     this.emit();
     this.maybeMarkSeen();
     await this.reattachPanes(gen);
@@ -170,9 +173,11 @@ export class CoreSession {
       await this.subscribeAndRead(gen, client);
     } catch (e) {
       if (gen !== this.generation) return;
-      this.error = e instanceof Error ? e.message : String(e);
+      this.setError(e, 'subscribe');
       this.emit();
+      return;
     }
+    if (gen === this.generation) this.clearError('subscribe');
   }
 
   private handleNotification(method: string, params: Record<string, unknown>): void {
@@ -180,10 +185,11 @@ export class CoreSession {
     try {
       r = reduceNotification(this.state, method, params);
     } catch (e) {
-      this.error = e instanceof Error ? e.message : String(e);
+      this.setError(e, 'event');
       this.emit();
       return;
     }
+    this.clearError('event');
     if (r.state !== this.state) {
       this.state = r.state;
       this.reconcilePanes();
@@ -249,16 +255,11 @@ export class CoreSession {
     // Write once, then stop even if the write is uncertain: reconcile from
     // events instead of retrying a person-triggered side effect forever.
     this.seenWritten.set(address, turn);
-    void client
-      .request('terminal.label', { terminal: address, labels: { 'herdr.seen': String(turn) } }, 10_000)
-      .then((raw) => {
-        const terminal = parseTerminal(raw);
-        this.replaceTerminal(terminal);
-      })
-      .catch((e) => {
-        this.error = e instanceof Error ? e.message : String(e);
-        this.emit();
-      });
+    void this.label(address, { 'herdr.seen': String(turn) }).catch((e) => {
+      if (client !== this.client) return;
+      this.setError(e, 'label');
+      this.emit();
+    });
   }
 
   async setPinned(address: string, pinned: boolean): Promise<void> {
@@ -279,7 +280,9 @@ export class CoreSession {
     const client = this.client;
     if (!client) throw new CoreCommandError('not_connected', 'Herdr Core is not connected');
     const raw = await client.request('terminal.label', { terminal: address, labels }, 10_000);
+    if (client !== this.client) return;
     const terminal = parseTerminal(raw);
+    this.clearError('label');
     this.replaceTerminal(terminal);
   }
 
@@ -345,9 +348,11 @@ export class CoreSession {
         await pane.reattach();
       } catch (e) {
         if (gen !== this.generation) return;
-        this.error = e instanceof Error ? e.message : String(e);
+        this.setError(e, 'reattach');
         this.emit();
+        continue;
       }
+      if (gen === this.generation) this.clearError('reattach');
     }
   }
 
@@ -365,9 +370,26 @@ export class CoreSession {
     } catch (e) {
       if (gen !== this.generation) return;
       this.status = 'error';
-      this.error = e instanceof Error ? e.message : String(e);
+      this.setError(e, null);
       this.emit();
     }
+  }
+
+  private setError(e: unknown, source: TransientError | null): void {
+    this.error = e instanceof Error ? e.message : String(e);
+    this.errorSource = source;
+  }
+
+  private resetError(): void {
+    this.error = null;
+    this.errorSource = null;
+  }
+
+  /** Clears a live-session error once the same kind of operation succeeds. */
+  private clearError(source: TransientError): void {
+    if (this.errorSource !== source) return;
+    this.resetError();
+    this.emit();
   }
 
   close(): void {

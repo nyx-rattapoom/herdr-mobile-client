@@ -56,6 +56,8 @@ export class TestCore {
   nextChannel = 5;
   doc: unknown = CORE_LAYOUT_DOC;
   docVersion = 1;
+  /** Methods whose next request is refused once with a transient error. */
+  failOnce = new Set<string>();
 
   constructor(
     readonly t: FakeByteTransport,
@@ -104,6 +106,10 @@ export class TestCore {
       if (plain) this.t.push(encodeUtf8(`${JSON.stringify({ jsonrpc: '2.0', id, error })}\n`));
       else this.t.push(encodeFrame(0, FRAME.DATA, encodeUtf8(JSON.stringify({ jsonrpc: '2.0', id, error }))));
     };
+    if (this.failOnce.delete(method)) {
+      fail('busy');
+      return;
+    }
     switch (method) {
       case 'hello':
         reply({

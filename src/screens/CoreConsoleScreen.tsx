@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
+  BackHandler,
   FlatList,
   KeyboardAvoidingView,
   Pressable,
@@ -66,6 +67,7 @@ type Props = {
 
 export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconnect }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
+  const closeTerminal = useCallback(() => setSelected(null), []);
   const terminals = useMemo(() => [...snapshot.state.terminals.values()], [snapshot.state]);
   const current = selected ? snapshot.state.terminals.get(selected) : undefined;
 
@@ -76,7 +78,7 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
         server={server}
         session={session}
         terminal={current}
-        onBack={() => setSelected(null)}
+        onBack={closeTerminal}
       />
     );
   }
@@ -250,6 +252,14 @@ function CoreTerminalView({
     setTextState(v);
     setDraft(key, v);
   };
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [onBack]);
 
   useEffect(() => {
     void pane

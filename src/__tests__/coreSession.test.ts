@@ -185,6 +185,32 @@ describe('CoreSession shared state and input', () => {
     session.close();
   });
 
+  it('clears a transient live error only after the same kind of operation succeeds', async () => {
+    const { core, session } = await setup();
+    core.failOnce.add('terminal.label');
+    session.setVisible('t7');
+    await flush();
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: 'busy' });
+
+    // A different kind of success does not hide the failed label write.
+    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: 11 } });
+    await flush();
+    expect(session.snapshot().error).toBe('busy');
+
+    await session.setPinned('t7', true);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+
+    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: Number.MAX_SAFE_INTEGER + 1 } });
+    await flush();
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+    await session.setPinned('t7', false);
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: 12 } });
+    await flush();
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    session.close();
+  });
+
   it('refuses a blocked prompt by default and never force-sends', async () => {
     const { core, session } = await setup([coreRecord('t7', { status: { state: 'blocked' }, turn: 3 })]);
     await expect(session.submit('t7', 'hello')).rejects.toMatchObject({ code: 'blocked' });
