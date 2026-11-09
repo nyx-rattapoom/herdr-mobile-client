@@ -6,7 +6,7 @@ import { parseLayout, type CoreLayout } from './layout';
 import { parseDocGet, parseSubscribe, parseTerminal, safeUint, CoreCommandError, type CoreTerminal } from './types';
 import type { ByteTransport } from './transport';
 
-type TransientError = 'subscribe' | 'event' | 'label' | 'reattach';
+type TransientError = 'state' | 'label' | 'reattach';
 
 export type CoreSessionStatus = 'connecting' | 'live' | 'reconnecting' | 'error' | 'closed';
 
@@ -135,6 +135,7 @@ export class CoreSession {
     const terminals = new Map<string, CoreTerminal>();
     for (const t of sub.terminals) terminals.set(t.address, t);
     this.state = { seq: sub.seq, terminals };
+    this.clearError('state');
     if (sub.channel !== null) this.registerEvents(gen, client, sub.channel);
     this.emit();
     this.maybeMarkSeen();
@@ -173,11 +174,9 @@ export class CoreSession {
       await this.subscribeAndRead(gen, client);
     } catch (e) {
       if (gen !== this.generation) return;
-      this.setError(e, 'subscribe');
+      this.setError(e, 'state');
       this.emit();
-      return;
     }
-    if (gen === this.generation) this.clearError('subscribe');
   }
 
   private handleNotification(method: string, params: Record<string, unknown>): void {
@@ -185,17 +184,17 @@ export class CoreSession {
     try {
       r = reduceNotification(this.state, method, params);
     } catch (e) {
-      this.setError(e, 'event');
+      this.setError(e, 'state');
       this.emit();
       return;
     }
-    this.clearError('event');
     if (r.state !== this.state) {
       this.state = r.state;
       this.reconcilePanes();
       this.emit();
     }
     if (r.missed) {
+      this.clearError('state');
       this.docError = null;
       this.scheduleDocRead();
       this.maybeMarkSeen();

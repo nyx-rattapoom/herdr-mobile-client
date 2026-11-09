@@ -199,14 +199,40 @@ describe('CoreSession shared state and input', () => {
 
     await session.setPinned('t7', true);
     expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    session.close();
+  });
 
-    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: Number.MAX_SAFE_INTEGER + 1 } });
+  it('keeps a rejected snapshot visible until an authoritative resnapshot replaces state', async () => {
+    const { t, core, session } = await setup();
+    core.event({
+      jsonrpc: '2.0',
+      method: 'missed',
+      params: { seq: 30, terminals: [coreRecord('t7', { turn: Number.MAX_SAFE_INTEGER + 1 })] },
+    });
     await flush();
     expect(session.snapshot().error).toMatch(/safe unsigned integer/);
-    await session.setPinned('t7', false);
-    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
-    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: 12 } });
+    expect(session.snapshot().state.seq).toBe(10);
+
+    // Ordinary events and other successes cannot repair the dropped snapshot.
+    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: 31 } });
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 32, type: 'size', terminal: 't7', data: { cols: 100, rows: 30 } } });
     await flush();
+    await session.setPinned('t7', true);
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+
+    core.event({ jsonrpc: '2.0', method: 'missed', params: { seq: 40, terminals: [coreRecord('t7', { turn: 2 })] } });
+    await flush();
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    expect(session.snapshot().state.terminals.get('t7')?.turn).toBe(2);
+
+    // A rejected event is likewise repaired only by the resubscribe snapshot.
+    core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 41, type: 'turn', terminal: 't7', data: { turn: Number.MAX_SAFE_INTEGER + 1 } } });
+    core.event({ jsonrpc: '2.0', method: 'heartbeat', params: { seq: 42 } });
+    await flush();
+    expect(session.snapshot().error).toMatch(/safe unsigned integer/);
+    t.push(encodeFrame(2, FRAME.CLOSE));
+    await flush();
+    expect(core.subscribeCount).toBe(2);
     expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
     session.close();
   });
