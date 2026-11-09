@@ -453,7 +453,8 @@ saved Core profile on iOS is gated before any native call.
 
 **Verification (host has no JDK/Android SDK and no disposable real `hc` fixture)**
 
-- `npm test -- --runInBand`: **42 suites / 326 tests pass** (baseline before this work: 33 / 249).
+- `npm test -- --runInBand`: all suites pass; review rounds keep adding tests, so the pipeline's test step is the
+  current count (baseline before this work: 33 suites / 249 tests).
 - `npm run typecheck`: pass. `npm run lint`: 0 errors; the only warning is the pre-existing
   `require()` warning in `sheet.test.tsx`.
 - New source-level tests: `coreFrames` (bytes, frames, limits, hc command/error mapping, platform gate),

@@ -57,9 +57,16 @@ describe('shared seen label', () => {
     expect(seenRaise(terminal({ state: 'finished', turn: 4 }), null)).toBeNull();
   });
 
-  it('marks unread with the one lower write, and nothing at turn zero', () => {
-    expect(seenMarkUnread(terminal({ turn: 4 }))).toBe(3);
-    expect(seenMarkUnread(terminal({ turn: 0 }))).toBeNull();
+  it('marks a seen terminal unread with the one lower write, and nothing that is already unread', () => {
+    expect(seenMarkUnread(terminal({ turn: 4, labels: { 'herdr.seen': '4' } }))).toBe(3);
+    expect(seenMarkUnread(terminal({ turn: 4, labels: { 'herdr.seen': '9' } }))).toBe(3);
+    expect(seenMarkUnread(terminal({ turn: 4, labels: { 'herdr.seen': '2' } }))).toBeNull();
+    expect(seenMarkUnread(terminal({ turn: 4 }))).toBeNull();
+    expect(seenMarkUnread(terminal({ turn: 0, labels: { 'herdr.seen': '0' } }))).toBeNull();
+    // After marking, the terminal reads as done (unread) and offers nothing more to mark.
+    const marked = terminal({ status: { state: 'done' }, turn: 4, labels: { 'herdr.seen': '3' } });
+    expect(attentionOf(marked)).toBe('done');
+    expect(seenMarkUnread(marked)).toBeNull();
   });
 });
 

@@ -20,7 +20,7 @@ import { layoutLine, type GridLine } from '../live/grid';
 import type { Line } from '../live/ansi';
 import type { CorePane } from '../core/CorePane';
 import type { CoreSession, CoreSessionSnapshot } from '../core/CoreSession';
-import { attentionOf, compareTerminals, isPinned, type Attention } from '../core/labels';
+import { attentionOf, compareTerminals, isPinned, seenMarkUnread, type Attention } from '../core/labels';
 import { unplacedTerminals } from '../core/layout';
 import type { CoreTerminal } from '../core/types';
 import type { ServerProfile } from '../store/servers';
@@ -118,7 +118,7 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
             label={pinned ? 'Unpin' : 'Pin'}
             onPress={() => void togglePin(session, t)}
           />
-          {attention === 'done' ? <SmallButton label="Mark unread" onPress={() => void session.markUnread(t.address)} /> : null}
+          {seenMarkUnread(t) !== null ? <SmallButton label="Mark unread" onPress={() => void session.markUnread(t.address)} /> : null}
         </View>
       </Pressable>
     );
