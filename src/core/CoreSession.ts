@@ -125,7 +125,7 @@ export class CoreSession {
     }
     this.hello = hello;
     await this.subscribeAndRead(gen, client);
-    if (gen !== this.generation) return;
+    if (gen !== this.generation || client.closed) return;
     this.status = 'live';
     this.error = null;
     this.emit();

@@ -239,22 +239,18 @@ describe('CoreSession shared state and input', () => {
     session.close();
   });
 
-  it('keeps an event rejected while the document read is in flight across start and reconnect', async () => {
-    const rejectDuringDocRead = (t: FakeByteTransport, core: TestCore) => {
-      const reply = t.onWrite;
-      t.onWrite = (bytes) => {
-        if (decodeUtf8(bytes).includes('"doc.get"')) {
-          core.event({ jsonrpc: '2.0', method: 'event', params: { seq: 11, type: 'turn', terminal: 't7', data: { turn: Number.MAX_SAFE_INTEGER + 1 } } });
-        }
-        reply?.(bytes);
-      };
-    };
+  it('keeps an event rejected while the document read is in flight, and a reconnect starts clean', async () => {
     const first = new FakeByteTransport();
     const firstCore = new TestCore(first);
     const second = new FakeByteTransport();
     const secondCore = new TestCore(second);
-    rejectDuringDocRead(first, firstCore);
-    rejectDuringDocRead(second, secondCore);
+    const reply = first.onWrite;
+    first.onWrite = (bytes) => {
+      if (decodeUtf8(bytes).includes('"doc.get"')) {
+        firstCore.event({ jsonrpc: '2.0', method: 'event', params: { seq: 11, type: 'turn', terminal: 't7', data: { turn: Number.MAX_SAFE_INTEGER + 1 } } });
+      }
+      reply(bytes);
+    };
     const transports = [first, second];
     const session = new CoreSession(async () => transports.shift() as FakeByteTransport);
 
@@ -263,9 +259,35 @@ describe('CoreSession shared state and input', () => {
     expect(session.snapshot()).toMatchObject({ status: 'live', error: expect.stringMatching(/safe unsigned integer/) });
     expect(session.snapshot().state.seq).toBe(10);
 
+    // A label failure is not repaired by a snapshot, only by a new connect attempt.
+    firstCore.failOnce.add('terminal.label');
+    session.setVisible('t7');
+    await flush();
+    expect(firstCore.failOnce.size).toBe(0);
+
     await session.reconnect();
     expect(secondCore.docReads).toBe(1);
-    expect(session.snapshot()).toMatchObject({ status: 'live', error: expect.stringMatching(/safe unsigned integer/) });
+    expect(secondCore.labelWrites).toHaveLength(0);
+    expect(session.snapshot()).toMatchObject({ status: 'live', error: null });
+    session.close();
+  });
+
+  it('does not report live when the connection closes while the document read is in flight', async () => {
+    const t = new FakeByteTransport();
+    new TestCore(t);
+    const reply = t.onWrite;
+    t.onWrite = (bytes) => {
+      if (decodeUtf8(bytes).includes('"doc.get"')) {
+        t.serverClose({ reason: 'eof', exitCode: 1, stderr: 'hc: lost' });
+        return;
+      }
+      reply(bytes);
+    };
+    const session = new CoreSession(async () => t);
+    await session.start();
+    const snap = session.snapshot();
+    expect(snap.status).toBe('error');
+    expect(snap.error).not.toBeNull();
     session.close();
   });
 
