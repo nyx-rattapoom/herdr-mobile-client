@@ -1,7 +1,7 @@
 # Android emulator evidence: Herdr Core backend
 
 Date: 2026-11-09. Base: `fm/herdr-core-backend` at `4b6039d` (PR #4). App version 1.2.0 /
-versionCode 10. Host: Intel MacBookPro16,1, macOS 25.3.0 (x86_64, hardware virtualization
+versionCode 10. Host: Intel MacBookPro16,1, macOS 26.3.1 (Darwin 25.3.0, x86_64, hardware virtualization
 available). All 10 screenshots are in [`docs/emulator-evidence/`](emulator-evidence/).
 
 ## Verdict
