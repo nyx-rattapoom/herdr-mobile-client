@@ -85,9 +85,11 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
 
   const sorted = [...terminals].sort((a, b) => compareTerminals(a, b));
   const layout = snapshot.layout;
-  const unplaced = unplacedTerminals(layout, sorted);
-  const liveUnplaced = unplaced.filter((t) => t.state === 'live');
   const banner = layoutBannerKind(snapshot.docError, layout);
+  // A failed refresh keeps the previous layout, but the error banner replaces
+  // the grouping; filtering against the stale layout would hide its terminals.
+  const unplaced = unplacedTerminals(banner === 'error' ? null : layout, sorted);
+  const liveUnplaced = unplaced.filter((t) => t.state === 'live');
   const byAddress = (address: string) => snapshot.state.terminals.get(address);
 
   const row = (t: CoreTerminal) => {
