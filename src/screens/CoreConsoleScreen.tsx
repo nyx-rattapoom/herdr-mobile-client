@@ -22,7 +22,7 @@ import type { Line } from '../live/ansi';
 import type { CorePane } from '../core/CorePane';
 import type { CoreSession, CoreSessionSnapshot } from '../core/CoreSession';
 import { attentionOf, compareTerminals, isPinned, seenMarkUnread, type Attention } from '../core/labels';
-import { unplacedTerminals } from '../core/layout';
+import { layoutBannerKind, unplacedTerminals } from '../core/layout';
 import type { CoreTerminal } from '../core/types';
 import type { ServerProfile } from '../store/servers';
 
@@ -85,7 +85,11 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
 
   const sorted = [...terminals].sort((a, b) => compareTerminals(a, b));
   const layout = snapshot.layout;
-  const unplaced = unplacedTerminals(layout, sorted);
+  const banner = layoutBannerKind(snapshot.docError, layout);
+  // A failed refresh keeps the previous layout, but the error banner replaces
+  // the grouping; filtering against the stale layout would hide its terminals.
+  const unplaced = unplacedTerminals(banner === 'error' ? null : layout, sorted);
+  const liveUnplaced = unplaced.filter((t) => t.state === 'live');
   const byAddress = (address: string) => snapshot.state.terminals.get(address);
 
   const row = (t: CoreTerminal) => {
@@ -139,7 +143,7 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
       />
       <StatusBanner snapshot={snapshot} onReconnect={onReconnect} />
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        {layout && layout.spaces.some((s) => s.tabs.some((t) => t.terminals.length)) ? (
+        {banner === 'ok' && layout ? (
           layout.spaces.map((space) => (
             <View key={space.id} style={{ marginTop: 12 }}>
               <Text style={[styles.label, { paddingHorizontal: 16, marginBottom: 6 }]}>
@@ -162,17 +166,19 @@ export function CoreConsoleScreen({ server, session, snapshot, onBack, onReconne
           ))
         ) : (
           <Text style={[styles.muted, { padding: 16 }]}>
-            {snapshot.docError
-              ? `Desktop layout is unavailable (${snapshot.docError}). Terminals are listed below.`
-              : 'No desktop layout document yet. Terminals are listed below.'}
+            {banner === 'error'
+              ? `Desktop layout is unavailable (${snapshot.docError}). Terminals are listed below and still open normally.`
+              : banner === 'empty'
+                ? 'Desktop layout is saved, but no terminals are placed in it yet. Terminals are listed below.'
+                : 'The desktop has not saved a layout yet, so terminals are listed below. They still open normally.'}
           </Text>
         )}
-        <Text style={[styles.label, { paddingHorizontal: 16, marginTop: 16, marginBottom: 6 }]}>Unplaced terminals</Text>
-        {unplaced.filter((t) => t.state === 'live').length ? (
-          unplaced.filter((t) => t.state === 'live').map(row)
-        ) : (
-          <Text style={[styles.muted, { paddingHorizontal: 16 }]}>Every terminal is placed in the desktop layout.</Text>
-        )}
+        {liveUnplaced.length ? (
+          <>
+            <Text style={[styles.label, { paddingHorizontal: 16, marginTop: 16, marginBottom: 6 }]}>Unplaced terminals</Text>
+            {liveUnplaced.map(row)}
+          </>
+        ) : null}
         {terminals.some((t) => t.state !== 'live') ? (
           <Text style={[styles.label, { paddingHorizontal: 16, marginTop: 16, marginBottom: 6 }]}>Finished</Text>
         ) : null}
