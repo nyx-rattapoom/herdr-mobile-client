@@ -58,3 +58,13 @@ export function unplacedTerminals(layout: CoreLayout | null, terminals: CoreTerm
   if (!layout) return terminals;
   return terminals.filter((t) => !layout.placed.has(t.address));
 }
+
+/** Why the console falls back to a flat terminal list instead of the desktop grouping. */
+export type LayoutBannerKind = 'error' | 'missing' | 'empty' | 'ok';
+
+export function layoutBannerKind(docError: string | null, layout: CoreLayout | null): LayoutBannerKind {
+  if (docError) return 'error';
+  if (!layout) return 'missing';
+  const hasTerminals = layout.spaces.some((s) => s.tabs.some((t) => t.terminals.length > 0));
+  return hasTerminals ? 'ok' : 'empty';
+}

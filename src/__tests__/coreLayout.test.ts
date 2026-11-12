@@ -1,4 +1,4 @@
-import { parseLayout, unplacedTerminals } from '../core/layout';
+import { layoutBannerKind, parseLayout, unplacedTerminals } from '../core/layout';
 import type { CoreTerminal } from '../core/types';
 
 const terminal = (address: string): CoreTerminal => ({
@@ -100,5 +100,27 @@ describe('core layout document', () => {
     expect(parseLayout('nope')).toEqual({ spaces: [], placed: new Set() });
     const layout = parseLayout({ spaces: [{ id: 's', tabs: [{ id: 't', root: { type: 'row', children: [null, 5, { type: 'block', content: null }] } }] }] });
     expect(layout?.spaces[0].tabs[0].terminals).toEqual([]);
+  });
+});
+
+describe('layout banner kind', () => {
+  it('reports an error when the document read failed, whatever the layout is', () => {
+    expect(layoutBannerKind('boom', null)).toBe('error');
+    expect(layoutBannerKind('boom', parseLayout(doc))).toBe('error');
+  });
+
+  it('reports a missing document when the desktop never wrote one', () => {
+    expect(layoutBannerKind(null, null)).toBe('missing');
+  });
+
+  it('reports an empty layout when a document exists but places no terminals', () => {
+    const layout = parseLayout({
+      spaces: [{ id: 's1', name: 'work', folder: '', tabs: [{ id: 'tab2', name: 'misc', root: { type: 'block', content: { mod: 'clock' } } }] }],
+    });
+    expect(layoutBannerKind(null, layout)).toBe('empty');
+  });
+
+  it('reports ok when the document places terminals', () => {
+    expect(layoutBannerKind(null, parseLayout(doc))).toBe('ok');
   });
 });
