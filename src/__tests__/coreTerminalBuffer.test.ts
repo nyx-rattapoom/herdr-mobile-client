@@ -13,6 +13,21 @@ describe('CoreTerminalBuffer text and controls', () => {
     expect(text(buf).split('\n').slice(0, 3)).toEqual(['100%', 'acd', 'a       b']);
   });
 
+  it('keeps Thai marks in their base cell, matching desktop cursor columns', () => {
+    const buf = new CoreTerminalBuffer(20, 2);
+    feed(buf, 'ช่วยดู');
+    expect(text(buf).split('\n')[0]).toBe('ช่วยดู');
+    // Four cells (ช่ ว ย ดู), not six — marks take no cell of their own.
+    expect(buf.cursor).toEqual({ row: 0, col: 4 });
+    // ASCII after Thai starts at the desktop terminal column.
+    feed(buf, ' X');
+    expect(buf.cursor).toEqual({ row: 0, col: 6 });
+    // A Thai line fits on the same width a desktop terminal fits it.
+    const narrow = new CoreTerminalBuffer(9, 2);
+    feed(narrow, 'ที่ยังเปิดอยู่');
+    expect(text(narrow)).toBe('ที่ยังเปิดอยู่');
+  });
+
   it('wraps at the right edge and records scrolled lines in bounded history', () => {
     const buf = new CoreTerminalBuffer(5, 2);
     feed(buf, 'abcdefghij');
