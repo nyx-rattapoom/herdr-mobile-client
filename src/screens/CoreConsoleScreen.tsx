@@ -332,8 +332,7 @@ function CoreTerminalView({
       }
       return g;
     });
-    const width = pane.buffer.cols;
-    return dropWrappedLinks(laid, (i) => laid[i].cols >= width);
+    return dropWrappedLinks(laid);
   }, [pane, tick, historyLayout]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {

@@ -615,11 +615,19 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
   return { cols: col, bg, items, text, links };
 }
 
-// Rows arrive hard-wrapped, so a row that mayWrap(i) and ends in non-space may continue on a next row
-// that starts with non-space. A URL touching such a boundary may be cut, so it gets no tap target.
-export function dropWrappedLinks(rows: GridLine[], mayWrap: (i: number) => boolean): GridLine[] {
+// Rows arrive hard-wrapped, so a row ending in non-space may continue on a next row that starts with
+// non-space; a URL touching such a boundary may be cut, so it gets no tap target. Rows from snapshotFrom
+// on come from one read, so one narrower than its widest row (less a cell for a wide glyph that wrapped
+// early) cannot have wrapped; earlier rows have an unknown width.
+export function dropWrappedLinks(rows: GridLine[], snapshotFrom = rows.length): GridLine[] {
+  let width = 0;
+  for (let i = snapshotFrom; i < rows.length; i++) width = Math.max(width, rows[i].cols);
   const open = (i: number) =>
-    i >= 0 && i < rows.length - 1 && mayWrap(i) && /\S$/.test(rows[i].text) && /^\S/.test(rows[i + 1].text);
+    i >= 0 &&
+    i < rows.length - 1 &&
+    (i < snapshotFrom || rows[i].cols >= width - 1) &&
+    /\S$/.test(rows[i].text) &&
+    /^\S/.test(rows[i + 1].text);
   let out = rows;
   rows.forEach((r, i) => {
     if (!r.links) return;

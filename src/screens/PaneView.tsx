@@ -110,9 +110,7 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
     () => {
       const snapshot = history.kind === 'shown' ? history.lines : lines;
       const rows = history.kind === 'shown' || !keptLines.length ? snapshot : [...keptLines, ...lines];
-      const width = snapshot.reduce((n, l) => Math.max(n, l.cols), 0);
-      const older = rows.length - snapshot.length;
-      return dropWrappedLinks(rows, (i) => i < older || rows[i].cols >= width);
+      return dropWrappedLinks(rows, rows.length - snapshot.length);
     },
     [history, keptLines, lines],
   );

@@ -44,16 +44,11 @@ describe('layoutLine links', () => {
 });
 
 describe('dropWrappedLinks', () => {
-  const snapshot = (...lines: string[]) => {
-    const rows = lines.map(one);
-    const width = rows.reduce((n, r) => Math.max(n, r.cols), 0);
-    return urlsOf(dropWrappedLinks(rows, (i) => rows[i].cols >= width));
-  };
+  const snapshot = (...lines: string[]) => urlsOf(dropWrappedLinks(lines.map(one), 0));
   const core = (cols: number, out: string) => {
     const buf = new CoreTerminalBuffer(cols, 4);
     buf.write(new TextEncoder().encode(out));
-    const rows = buf.allLines().map((l) => layoutLine(l));
-    return urlsOf(dropWrappedLinks(rows, (i) => rows[i].cols >= buf.cols));
+    return urlsOf(dropWrappedLinks(buf.allLines().map((l) => layoutLine(l))));
   };
   const urlsOf = (g: GridLine[]) => g.map((r) => r.links?.map((l) => l.url));
 
@@ -85,14 +80,26 @@ describe('dropWrappedLinks', () => {
     ]);
   });
 
-  it('uses the terminal width in the Core console', () => {
-    expect(core(20, 'open https://example.com/login?code=abc123 now')).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    expect(core(20, 'go https://b.dev/x\r\nDone')).toEqual([['https://b.dev/x'], undefined, undefined, undefined]);
+  it('treats a row one cell short of the widest as wrapped before a wide glyph', () => {
+    expect(snapshot('a full row of twenty', 'see https://ja.dev/', '日本語 wiki')).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('measures the width over the current snapshot only, not older kept rows', () => {
+    const kept = one('older output from a wider pane, a long row');
+    const rows = [kept, ...['Open https://github.com/login/device', 'Enter code: ABCD-1234'].map(one)];
+    expect(urlsOf(dropWrappedLinks(rows, 1))).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('treats older kept rows as possibly wrapped whatever their width', () => {
+    const rows = ['see https://a.dev/x', 'more', 'a much wider snapshot row of pane output'].map(one);
+    expect(urlsOf(dropWrappedLinks(rows, 2))).toEqual([undefined, undefined, undefined]);
+    expect(urlsOf(dropWrappedLinks(rows, 0))).toEqual([['https://a.dev/x'], undefined, undefined]);
+  });
+
+  it('gives no tap target to a URL at any row edge in the Core console', () => {
+    expect(core(20, 'open https://example.com/login?code=abc123 now')).toEqual([undefined, undefined, undefined, undefined]);
+    expect(core(30, 'go https://b.dev/x\r\nDone')).toEqual([undefined, undefined, undefined, undefined]);
+    expect(core(30, 'go https://b.dev/x ok\r\nDone')).toEqual([['https://b.dev/x'], undefined, undefined, undefined]);
   });
 });
 
