@@ -1,8 +1,8 @@
 import { memo, useMemo, useState } from 'react';
-import { PixelRatio, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Alert, Linking, PixelRatio, Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import type { Style } from '../live/ansi';
-import { cellColors, type GridItem, type GridLine } from '../live/grid';
+import { cellColors, type GridItem, type GridLine, type GridLink } from '../live/grid';
 
 export const TERM_FG = '#e5e7eb';
 export const TERM_BG = '#000';
@@ -161,6 +161,31 @@ function renderItem(it: GridItem, m: CellMetrics, key: number): React.ReactNode 
   }
 }
 
+export function openLink(url: string): void {
+  Linking.openURL(url).catch(() => Alert.alert("Couldn't open link", url));
+}
+
+function LinkSpot({ link, m }: { link: GridLink; m: CellMetrics }) {
+  return (
+    <Pressable
+      testID="term-link"
+      accessibilityRole="link"
+      accessibilityLabel={link.url}
+      onPress={() => openLink(link.url)}
+      style={({ pressed }) => ({
+        position: 'absolute',
+        left: link.col * m.w,
+        top: 0,
+        width: link.cells * m.w,
+        height: m.h,
+        backgroundColor: pressed ? 'rgba(255,255,255,0.2)' : undefined,
+      })}
+    >
+      <View style={rect(0, m.h - m.line, link.cells * m.w, m.line, TERM_FG, 0.5)} />
+    </Pressable>
+  );
+}
+
 export const TermRow = memo(function TermRow({ g, m }: { g: GridLine; m: CellMetrics }) {
   return (
     <View style={{ height: m.h, width: g.cols * m.w }}>
@@ -168,6 +193,7 @@ export const TermRow = memo(function TermRow({ g, m }: { g: GridLine; m: CellMet
         <View key={`bg${i}`} style={rect(b.col * m.w, 0, b.cells * m.w, m.h, b.color)} />
       ))}
       {g.items.map((it, i) => renderItem(it, m, i))}
+      {g.links?.map((l, i) => <LinkSpot key={`link${i}`} link={l} m={m} />)}
     </View>
   );
 });

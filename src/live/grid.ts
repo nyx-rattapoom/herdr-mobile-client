@@ -1,4 +1,5 @@
 import type { Line, Style } from './ansi';
+import { findUrls } from './links';
 
 export type Rect = {
   x: number;
@@ -18,7 +19,9 @@ export type GridItem =
   | { kind: 'arc'; col: number; cells: number; arc: Arc; style: Style };
 
 export type GridBg = { col: number; cells: number; color: string };
-export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[] };
+export type GridLink = { col: number; cells: number; url: string };
+// links is present only on rows that contain a URL.
+export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[]; text: string; links?: GridLink[] };
 
 export function cellColors(s: Style, defaultFg: string, defaultBg: string): { fg: string; bg?: string } {
   if (s.inverse) return { fg: s.bg ?? defaultBg, bg: s.fg ?? defaultFg };
@@ -537,6 +540,7 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
   const bg: GridBg[] = [];
   const items: GridItem[] = [];
   let col = 0;
+  let text = '';
 
   const pushBg = (c: number, cells: number, color: string | undefined) => {
     if (!color || cells === 0) return;
@@ -549,6 +553,7 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
     const { bg: spanBg } = cellColors(span.style, defaultFg, defaultBg);
     const style = span.style;
     for (const ch of span.text) {
+      text += ch;
       const cp = ch.codePointAt(0)!;
       const last = items[items.length - 1];
       if (ch === '\t') {
@@ -603,7 +608,51 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
       col += w;
     }
   }
-  return { cols: col, bg, items };
+  const urls = findUrls(text);
+  if (!urls.length) return { cols: col, bg, items, text };
+  const at = columnsOf(text);
+  const links = urls.map(({ index, length, url }) => ({ col: at[index], cells: at[index + length] - at[index], url }));
+  return { cols: col, bg, items, text, links };
+}
+
+// Rows arrive hard-wrapped, so a row ending in non-space may continue on a next row that starts with
+// non-space; a URL touching such a boundary may be cut, so it gets no tap target. Rows from snapshotFrom
+// on come from one read, so one narrower than its widest row (less a cell for a wide glyph that wrapped
+// early) cannot have wrapped; earlier rows have an unknown width. This relies on Herdr reflowing its
+// scrollback on resize (checked live against Herdr 0.9.5), so a read never mixes rows of different widths.
+export function dropWrappedLinks(rows: GridLine[], snapshotFrom = rows.length): GridLine[] {
+  let width = 0;
+  for (let i = snapshotFrom; i < rows.length; i++) width = Math.max(width, rows[i].cols);
+  const open = (i: number) =>
+    i >= 0 &&
+    i < rows.length - 1 &&
+    (i < snapshotFrom || rows[i].cols >= width - 1) &&
+    /\S$/.test(rows[i].text) &&
+    /^\S/.test(rows[i + 1].text);
+  let out = rows;
+  rows.forEach((r, i) => {
+    if (!r.links) return;
+    const at = columnsOf(r.text);
+    const headEnd = open(i - 1) ? at[r.text.search(/\s|$/)] : 0;
+    const tailStart = open(i) ? at[r.text.search(/\S*$/)] : r.cols;
+    const keep = r.links.filter((l) => l.col >= headEnd && l.col + l.cells <= tailStart);
+    if (keep.length === r.links.length) return;
+    if (out === rows) out = rows.slice();
+    out[i] = { ...r, links: keep.length ? keep : undefined };
+  });
+  return out;
+}
+
+// Start column of each UTF-16 unit of text (plus its end), by the same width rules as layoutLine.
+function columnsOf(text: string): number[] {
+  const at: number[] = [];
+  let col = 0;
+  for (const ch of text) {
+    for (let i = 0; i < ch.length; i++) at.push(col);
+    col += ch === '\t' ? 8 - (col % 8) : cellWidth(ch.codePointAt(0)!);
+  }
+  at.push(col);
+  return at;
 }
 
 const sameRow = (a: Rect, b: Rect) => a.y === b.y && a.h === b.h && a.opacity === b.opacity && a.x === 0 && b.x === 0;
