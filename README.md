@@ -20,8 +20,9 @@ SSH module (see [docs/SPIKE.md](docs/SPIKE.md) §6 for what differs). Per-milest
   key, its host key is pinned separately, and each jump host only relays the encrypted session to the next.
 - Ed25519 device key (generated on the phone), with password as fallback. Optional biometric unlock for saved
   credentials.
-- Live sessions → workspaces → tabs → panes. Pane output with scrollback. Text, keys and agent prompts. Focus,
-  create and close tabs, panes and workspaces (closes ask for confirmation).
+- Live sessions → workspaces → tabs → panes. Pane output with scrollback; tap an http(s) URL in it to open it in
+  the device browser (a URL that may be cut off where a row wraps gets no tap target). Text, keys and agent prompts.
+  Focus, create and close tabs, panes and workspaces (closes ask for confirmation).
 - Agent status and local notifications when an agent is blocked or finishes, kept alive in the background by a
   foreground service on Android (limits are in PROGRESS.md). iOS only gets a short grace period in the background.
 - Installs Herdr with the official installer when it's missing, or starts its server.
