@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { parseAnsi, type Line } from '../live/ansi';
-import { layoutLine, type GridLine } from '../live/grid';
+import { joinWrappedLinks, layoutLine, type GridLine } from '../live/grid';
 import { usePaneOutput } from '../live/hooks';
 import type { LiveSession } from '../live/LiveSession';
 import type { PaneOutput } from '../live/PaneReader';
@@ -107,7 +107,7 @@ export function PaneView({ live, paneId, agent, agentStatus, footer, overlay }: 
   const keptLines = useMemo(() => (tracking ? shownRows(kept).map(layoutKept) : []), [tracking, kept]);
   const [history, setHistory] = useState<History>({ kind: 'idle' });
   const shown = useMemo(
-    () => (history.kind === 'shown' ? history.lines : keptLines.length ? [...keptLines, ...lines] : lines),
+    () => joinWrappedLinks(history.kind === 'shown' ? history.lines : keptLines.length ? [...keptLines, ...lines] : lines),
     [history, keptLines, lines],
   );
   const busy = agentStatus === 'working' || agentStatus === 'blocked';

@@ -17,7 +17,7 @@ import {
 import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
 import { Header, colors, styles } from './ui';
 import { draftKey, getDraft, setDraft } from '../live/drafts';
-import { layoutLine, type GridLine } from '../live/grid';
+import { joinWrappedLinks, layoutLine, type GridLine } from '../live/grid';
 import type { Line } from '../live/ansi';
 import type { CorePane } from '../core/CorePane';
 import type { CoreSession, CoreSessionSnapshot } from '../core/CoreSession';
@@ -323,15 +323,16 @@ function CoreTerminalView({
     void tick;
     if (!pane) return [];
     const history = pane.buffer.historyLength;
-    return pane.buffer.allLines().map((l, i) => {
+    const laid = pane.buffer.allLines().map((l, i) => {
       if (i >= history) return layoutLine(l, TERM_FG, TERM_BG);
-      let laid = historyLayout.get(l);
-      if (!laid) {
-        laid = layoutLine(l, TERM_FG, TERM_BG);
-        historyLayout.set(l, laid);
+      let g = historyLayout.get(l);
+      if (!g) {
+        g = layoutLine(l, TERM_FG, TERM_BG);
+        historyLayout.set(l, g);
       }
-      return laid;
+      return g;
     });
+    return joinWrappedLinks(laid, pane.buffer.cols);
   }, [pane, tick, historyLayout]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {

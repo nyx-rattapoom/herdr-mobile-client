@@ -21,7 +21,7 @@ export type GridItem =
 export type GridBg = { col: number; cells: number; color: string };
 export type GridLink = { col: number; cells: number; url: string };
 // links is present only on rows that contain a URL.
-export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[]; links?: GridLink[] };
+export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[]; text: string; links?: GridLink[] };
 
 export function cellColors(s: Style, defaultFg: string, defaultBg: string): { fg: string; bg?: string } {
   if (s.inverse) return { fg: s.bg ?? defaultBg, bg: s.fg ?? defaultFg };
@@ -609,10 +609,42 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
     }
   }
   const urls = findUrls(text);
-  if (!urls.length) return { cols: col, bg, items };
+  if (!urls.length) return { cols: col, bg, items, text };
   const at = columnsOf(text);
   const links = urls.map(({ index, length, url }) => ({ col: at[index], cells: at[index + length] - at[index], url }));
-  return { cols: col, bg, items, links };
+  return { cols: col, bg, items, text, links };
+}
+
+// Rows arrive hard-wrapped at the pane width, so a row that fills it and ends in a non-space continues
+// on a next row that starts with one; URLs spanning such rows link every segment to the whole URL.
+export function joinWrappedLinks(rows: GridLine[], width = rows.reduce((n, r) => Math.max(n, r.cols), 0)): GridLine[] {
+  const wraps = (i: number) => rows[i].cols === width && /\S$/.test(rows[i].text) && /^\S/.test(rows[i + 1].text);
+  let out = rows;
+  for (let i = 0; i < rows.length - 1; i++) {
+    if (!wraps(i)) continue;
+    let j = i + 1;
+    while (j < rows.length - 1 && wraps(j)) j++;
+    const run = rows.slice(i, j + 1);
+    const urls = findUrls(run.map((r) => r.text).join(''));
+    if (urls.length) {
+      if (out === rows) out = rows.slice();
+      let start = 0;
+      run.forEach((r, k) => {
+        const end = start + r.text.length;
+        const at = columnsOf(r.text);
+        const links: GridLink[] = [];
+        for (const { index, length, url } of urls) {
+          const a = Math.max(index, start) - start;
+          const b = Math.min(index + length, end) - start;
+          if (a < b) links.push({ col: at[a], cells: at[b] - at[a], url });
+        }
+        out[i + k] = { ...r, links: links.length ? links : undefined };
+        start = end;
+      });
+    }
+    i = j;
+  }
+  return out;
 }
 
 // Start column of each UTF-16 unit of text (plus its end), by the same width rules as layoutLine.

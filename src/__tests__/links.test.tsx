@@ -2,7 +2,8 @@ import { Alert, Linking } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { parseAnsi } from '../live/ansi';
-import { layoutLine } from '../live/grid';
+import { CoreTerminalBuffer } from '../core/terminalBuffer';
+import { joinWrappedLinks, layoutLine } from '../live/grid';
 import { findUrls } from '../live/links';
 import { TermRow, cellMetrics } from '../screens/TermView';
 
@@ -42,6 +43,45 @@ describe('layoutLine links', () => {
   });
 });
 
+describe('joinWrappedLinks', () => {
+  const URL = 'https://example.com/login?code=abc123';
+  const rows = (...lines: string[]) => joinWrappedLinks(lines.map(one));
+
+  it('links every row of a URL the terminal wrapped to the whole URL', () => {
+    const buf = new CoreTerminalBuffer(20, 4);
+    buf.write(new TextEncoder().encode(`open ${URL} now`));
+    const g = joinWrappedLinks(
+      buf.allLines().map((l) => layoutLine(l)),
+      buf.cols,
+    );
+    expect(g.slice(0, 3).map((r) => r.links)).toEqual([
+      [{ col: 5, cells: 15, url: URL }],
+      [{ col: 0, cells: 20, url: URL }],
+      [{ col: 0, cells: 2, url: URL }],
+    ]);
+  });
+
+  it('takes the widest row as the pane width when none is given', () => {
+    const g = rows('see https://a.dev/lo', 'gin?x=1 ok', 'short');
+    expect(g.map((r) => r.links)).toEqual([
+      [{ col: 4, cells: 16, url: 'https://a.dev/login?x=1' }],
+      [{ col: 0, cells: 7, url: 'https://a.dev/login?x=1' }],
+      undefined,
+    ]);
+  });
+
+  it('keeps a URL on its own row when the row ends before the pane width or the next row starts blank', () => {
+    const g = rows('a full row of twenty', 'visit https://a.dev', 'Done', 'go https://b.dev/xyz', '  next');
+    expect(g.map((r) => r.links?.map((l) => l.url))).toEqual([
+      undefined,
+      ['https://a.dev'],
+      undefined,
+      ['https://b.dev/xyz'],
+      undefined,
+    ]);
+  });
+});
+
 describe('TermRow links', () => {
   const row = (s: string) => {
     let r: ReactTestRenderer | undefined;
@@ -70,6 +110,20 @@ describe('TermRow links', () => {
     expect(alert).toHaveBeenCalledWith("Couldn't open link", 'https://a.dev');
     open.mockRestore();
     alert.mockRestore();
+  });
+
+  it('opens the whole URL from each row it wraps across', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    const g = joinWrappedLinks(['see https://a.dev/lo', 'gin?x=1 ok'].map(one));
+    for (const line of g) {
+      let r: ReactTestRenderer | undefined;
+      act(() => {
+        r = create(<TermRow g={line} m={cellMetrics(12, 7)} />);
+      });
+      await act(async () => spots(r!)[0].props.onPress());
+    }
+    expect(open.mock.calls).toEqual([['https://a.dev/login?x=1'], ['https://a.dev/login?x=1']]);
+    open.mockRestore();
   });
 
   it('adds no tap targets to rows without URLs', () => {
