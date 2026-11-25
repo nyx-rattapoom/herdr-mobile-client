@@ -618,7 +618,8 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
 // Rows arrive hard-wrapped, so a row ending in non-space may continue on a next row that starts with
 // non-space; a URL touching such a boundary may be cut, so it gets no tap target. Rows from snapshotFrom
 // on come from one read, so one narrower than its widest row (less a cell for a wide glyph that wrapped
-// early) cannot have wrapped; earlier rows have an unknown width.
+// early) cannot have wrapped; earlier rows have an unknown width. This relies on Herdr reflowing its
+// scrollback on resize (checked live against Herdr 0.9.5), so a read never mixes rows of different widths.
 export function dropWrappedLinks(rows: GridLine[], snapshotFrom = rows.length): GridLine[] {
   let width = 0;
   for (let i = snapshotFrom; i < rows.length; i++) width = Math.max(width, rows[i].cols);
