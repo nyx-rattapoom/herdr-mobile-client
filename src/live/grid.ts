@@ -1,4 +1,5 @@
 import type { Line, Style } from './ansi';
+import { findUrls } from './links';
 
 export type Rect = {
   x: number;
@@ -18,7 +19,9 @@ export type GridItem =
   | { kind: 'arc'; col: number; cells: number; arc: Arc; style: Style };
 
 export type GridBg = { col: number; cells: number; color: string };
-export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[] };
+export type GridLink = { col: number; cells: number; url: string };
+// links is present only on rows that contain a URL.
+export type GridLine = { cols: number; bg: GridBg[]; items: GridItem[]; links?: GridLink[] };
 
 export function cellColors(s: Style, defaultFg: string, defaultBg: string): { fg: string; bg?: string } {
   if (s.inverse) return { fg: s.bg ?? defaultBg, bg: s.fg ?? defaultFg };
@@ -537,6 +540,7 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
   const bg: GridBg[] = [];
   const items: GridItem[] = [];
   let col = 0;
+  let text = '';
 
   const pushBg = (c: number, cells: number, color: string | undefined) => {
     if (!color || cells === 0) return;
@@ -549,6 +553,7 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
     const { bg: spanBg } = cellColors(span.style, defaultFg, defaultBg);
     const style = span.style;
     for (const ch of span.text) {
+      text += ch;
       const cp = ch.codePointAt(0)!;
       const last = items[items.length - 1];
       if (ch === '\t') {
@@ -603,7 +608,23 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
       col += w;
     }
   }
-  return { cols: col, bg, items };
+  const urls = findUrls(text);
+  if (!urls.length) return { cols: col, bg, items };
+  const at = columnsOf(text);
+  const links = urls.map(({ index, length, url }) => ({ col: at[index], cells: at[index + length] - at[index], url }));
+  return { cols: col, bg, items, links };
+}
+
+// Start column of each UTF-16 unit of text (plus its end), by the same width rules as layoutLine.
+function columnsOf(text: string): number[] {
+  const at: number[] = [];
+  let col = 0;
+  for (const ch of text) {
+    for (let i = 0; i < ch.length; i++) at.push(col);
+    col += ch === '\t' ? 8 - (col % 8) : cellWidth(ch.codePointAt(0)!);
+  }
+  at.push(col);
+  return at;
 }
 
 const sameRow = (a: Rect, b: Rect) => a.y === b.y && a.h === b.h && a.opacity === b.opacity && a.x === 0 && b.x === 0;
