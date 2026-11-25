@@ -615,33 +615,46 @@ export function layoutLine(line: Line, defaultFg = '#fff', defaultBg = '#000'): 
   return { cols: col, bg, items, text, links };
 }
 
-// Rows arrive hard-wrapped at the pane width, so a row that fills it and ends in a non-space continues
-// on a next row that starts with one; URLs spanning such rows link every segment to the whole URL.
-export function joinWrappedLinks(rows: GridLine[], width = rows.reduce((n, r) => Math.max(n, r.cols), 0)): GridLine[] {
-  const wraps = (i: number) => rows[i].cols === width && /\S$/.test(rows[i].text) && /^\S/.test(rows[i + 1].text);
+// Links URLs that soft-wrap across rows: where wraps(i) says row i continues on row i + 1, every
+// segment of a URL spanning them opens the whole URL. Without wrap information a URL touching a row
+// boundary with non-space on both sides may be cut, so it gets no tap target rather than a guessed one.
+export function joinWrappedLinks(rows: GridLine[], wraps?: (i: number) => boolean): GridLine[] {
   let out = rows;
+  const relink = (i: number, links: GridLink[]) => {
+    if (out === rows) out = rows.slice();
+    out[i] = { ...rows[i], links: links.length ? links : undefined };
+  };
+  if (!wraps) {
+    const open = (i: number) => i >= 0 && i < rows.length - 1 && /\S$/.test(rows[i].text) && /^\S/.test(rows[i + 1].text);
+    rows.forEach((r, i) => {
+      if (!r.links) return;
+      const at = columnsOf(r.text);
+      const headEnd = open(i - 1) && /:\/\/\S*$/.test(rows[i - 1].text) ? at[r.text.search(/\s|$/)] : 0;
+      const tailStart = open(i) ? at[r.text.search(/\S*$/)] : r.cols;
+      const keep = r.links.filter((l) => l.col >= headEnd && l.col + l.cells <= tailStart);
+      if (keep.length !== r.links.length) relink(i, keep);
+    });
+    return out;
+  }
   for (let i = 0; i < rows.length - 1; i++) {
     if (!wraps(i)) continue;
     let j = i + 1;
     while (j < rows.length - 1 && wraps(j)) j++;
     const run = rows.slice(i, j + 1);
     const urls = findUrls(run.map((r) => r.text).join(''));
-    if (urls.length) {
-      if (out === rows) out = rows.slice();
-      let start = 0;
-      run.forEach((r, k) => {
-        const end = start + r.text.length;
-        const at = columnsOf(r.text);
-        const links: GridLink[] = [];
-        for (const { index, length, url } of urls) {
-          const a = Math.max(index, start) - start;
-          const b = Math.min(index + length, end) - start;
-          if (a < b) links.push({ col: at[a], cells: at[b] - at[a], url });
-        }
-        out[i + k] = { ...r, links: links.length ? links : undefined };
-        start = end;
-      });
-    }
+    let start = 0;
+    run.forEach((r, k) => {
+      const end = start + r.text.length;
+      const at = columnsOf(r.text);
+      const links: GridLink[] = [];
+      for (const { index, length, url } of urls) {
+        const a = Math.max(index, start) - start;
+        const b = Math.min(index + length, end) - start;
+        if (a < b) links.push({ col: at[a], cells: at[b] - at[a], url });
+      }
+      if (links.length || r.links) relink(i + k, links);
+      start = end;
+    });
     i = j;
   }
   return out;

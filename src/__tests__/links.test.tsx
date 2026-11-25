@@ -2,8 +2,8 @@ import { Alert, Linking } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { parseAnsi } from '../live/ansi';
-import { CoreTerminalBuffer } from '../core/terminalBuffer';
-import { joinWrappedLinks, layoutLine } from '../live/grid';
+import { CoreTerminalBuffer, continuesOnNextLine } from '../core/terminalBuffer';
+import { joinWrappedLinks, layoutLine, type GridLine } from '../live/grid';
 import { findUrls } from '../live/links';
 import { TermRow, cellMetrics } from '../screens/TermView';
 
@@ -45,40 +45,51 @@ describe('layoutLine links', () => {
 
 describe('joinWrappedLinks', () => {
   const URL = 'https://example.com/login?code=abc123';
-  const rows = (...lines: string[]) => joinWrappedLinks(lines.map(one));
+  const core = (cols: number, out: string) => {
+    const buf = new CoreTerminalBuffer(cols, 4);
+    buf.write(new TextEncoder().encode(out));
+    const all = buf.allLines();
+    return joinWrappedLinks(
+      all.map((l) => layoutLine(l)),
+      (i) => continuesOnNextLine(all[i]),
+    );
+  };
+  const urlsOf = (g: GridLine[]) => g.map((r) => r.links?.map((l) => l.url));
 
   it('links every row of a URL the terminal wrapped to the whole URL', () => {
-    const buf = new CoreTerminalBuffer(20, 4);
-    buf.write(new TextEncoder().encode(`open ${URL} now`));
-    const g = joinWrappedLinks(
-      buf.allLines().map((l) => layoutLine(l)),
-      buf.cols,
-    );
-    expect(g.slice(0, 3).map((r) => r.links)).toEqual([
+    expect(core(20, `open ${URL} now`).slice(0, 3).map((r) => r.links)).toEqual([
       [{ col: 5, cells: 15, url: URL }],
       [{ col: 0, cells: 20, url: URL }],
       [{ col: 0, cells: 2, url: URL }],
     ]);
   });
 
-  it('takes the widest row as the pane width when none is given', () => {
-    const g = rows('see https://a.dev/lo', 'gin?x=1 ok', 'short');
-    expect(g.map((r) => r.links)).toEqual([
-      [{ col: 4, cells: 16, url: 'https://a.dev/login?x=1' }],
-      [{ col: 0, cells: 7, url: 'https://a.dev/login?x=1' }],
-      undefined,
-    ]);
+  it('does not join a full row that ended with a newline', () => {
+    expect(urlsOf(core(20, 'go https://b.dev/xyz\r\nDone'))).toEqual([['https://b.dev/xyz'], undefined, undefined, undefined]);
   });
 
-  it('keeps a URL on its own row when the row ends before the pane width or the next row starts blank', () => {
-    const g = rows('a full row of twenty', 'visit https://a.dev', 'Done', 'go https://b.dev/xyz', '  next');
-    expect(g.map((r) => r.links?.map((l) => l.url))).toEqual([
-      undefined,
-      ['https://a.dev'],
-      undefined,
-      ['https://b.dev/xyz'],
-      undefined,
-    ]);
+  it('ends a wrapped URL at a space in the last column', () => {
+    expect(urlsOf(core(20, 'see https://a.dev/x next'))).toEqual([['https://a.dev/x'], undefined, undefined, undefined]);
+  });
+
+  describe('without wrap information', () => {
+    const rows = (...lines: string[]) => urlsOf(joinWrappedLinks(lines.map(one)));
+
+    it('never opens a URL guessed across rows', () => {
+      expect(rows('Open https://github.com/login/device', 'Enter code: ABCD-1234')).toEqual([undefined, undefined]);
+      expect(rows('see https://a.dev/lo', 'gin?x=1 ok')).toEqual([undefined, undefined]);
+      expect(rows('id https://a.dev/?u=', 'http://b.dev more')).toEqual([undefined, undefined]);
+    });
+
+    it('keeps URLs that a space or blank row ends', () => {
+      expect(rows('visit https://a.dev', '  next', 'https://b.dev ok', 'Done', 'last https://c.dev')).toEqual([
+        ['https://a.dev'],
+        undefined,
+        ['https://b.dev'],
+        undefined,
+        ['https://c.dev'],
+      ]);
+    });
   });
 });
 
@@ -114,8 +125,14 @@ describe('TermRow links', () => {
 
   it('opens the whole URL from each row it wraps across', async () => {
     const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
-    const g = joinWrappedLinks(['see https://a.dev/lo', 'gin?x=1 ok'].map(one));
-    for (const line of g) {
+    const buf = new CoreTerminalBuffer(20, 4);
+    buf.write(new TextEncoder().encode('see https://a.dev/login?x=1 ok'));
+    const all = buf.allLines();
+    const g = joinWrappedLinks(
+      all.map((l) => layoutLine(l)),
+      (i) => continuesOnNextLine(all[i]),
+    );
+    for (const line of g.slice(0, 2)) {
       let r: ReactTestRenderer | undefined;
       act(() => {
         r = create(<TermRow g={line} m={cellMetrics(12, 7)} />);

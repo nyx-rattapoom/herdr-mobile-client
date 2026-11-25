@@ -18,6 +18,9 @@ type Cell = {
   w: 0 | 1 | 2;
 };
 
+/** wrapped: autowrap carried this row's text on to the next row. */
+type Row = Cell[] & { wrapped?: boolean };
+
 const blank = (): Cell => ({ ch: ' ', style: {}, w: 1 });
 const clone = (c: Cell): Cell => ({ ch: c.ch, style: { ...c.style }, w: c.w });
 
@@ -27,7 +30,7 @@ const MAX_COLS = 400;
 const MAX_ROWS = 300;
 
 export class CoreTerminalBuffer {
-  private cells: Cell[][];
+  private cells: Row[];
   private row = 0;
   private col = 0;
   private style: Style = {};
@@ -38,7 +41,7 @@ export class CoreTerminalBuffer {
   private bottom: number;
   private saved: { row: number; col: number; style: Style } | null = null;
   private altScreen = false;
-  private savedMain: { cells: Cell[][]; row: number; col: number; style: Style } | null = null;
+  private savedMain: { cells: Row[]; row: number; col: number; style: Style } | null = null;
   /** A ring once full: `historyHead` is the oldest line. */
   private history: Line[] = [];
   private historyHead = 0;
@@ -537,6 +540,7 @@ export class CoreTerminalBuffer {
     }
     if (this.wrapPending) {
       if (this.autoWrap) {
+        this.cells[this.row].wrapped = true;
         this.col = 0;
         this.lineFeed();
       }
@@ -545,6 +549,7 @@ export class CoreTerminalBuffer {
     let w = width;
     if (w === 2 && this.col >= this._cols - 1) {
       if (this.autoWrap) {
+        this.cells[this.row].wrapped = true;
         this.col = 0;
         this.lineFeed();
       } else {
@@ -631,6 +636,7 @@ export class CoreTerminalBuffer {
 
   private eraseLine(mode: number): void {
     const row = this.cells[this.row];
+    if (mode !== 1) row.wrapped = false;
     if (mode === 0) for (let x = this.col; x < this._cols; x++) row[x] = blank();
     else if (mode === 1) for (let x = 0; x <= this.col; x++) row[x] = blank();
     else if (mode === 2) for (let x = 0; x < this._cols; x++) row[x] = blank();
@@ -734,14 +740,15 @@ function blankRow(cols: number): Cell[] {
   return Array.from({ length: cols }, blank);
 }
 
-function blankGrid(cols: number, rows: number): Cell[][] {
+function blankGrid(cols: number, rows: number): Row[] {
   return Array.from({ length: rows }, () => blankRow(cols));
 }
 
-function resizeGrid(cells: Cell[][], oldCols: number, oldRows: number, cols: number, rows: number): Cell[][] {
+function resizeGrid(cells: Row[], oldCols: number, oldRows: number, cols: number, rows: number): Row[] {
   const next = blankGrid(cols, rows);
   const copyRows = Math.min(rows, oldRows);
   for (let y = 0; y < copyRows; y++) {
+    if (cols === oldCols) next[y].wrapped = cells[y].wrapped;
     const copyCols = Math.min(cols, oldCols);
     for (let x = 0; x < copyCols; x++) next[y][x] = clone(cells[y][x]);
     // A wide glyph cut by the new right edge cannot keep half a cell.
@@ -754,13 +761,21 @@ function resizeGrid(cells: Cell[][], oldCols: number, oldRows: number, cols: num
 
 const visible = (c: Cell): boolean => !(c.ch === ' ' && c.w === 1 && !c.style.bg && !c.style.inverse && !c.style.underline);
 
-function rowToLine(row: Cell[]): Line {
+const wrappedLines = new WeakSet<Line>();
+
+/** True when autowrap continued this line of `allLines()` on the next one. */
+export function continuesOnNextLine(line: Line): boolean {
+  return wrappedLines.has(line);
+}
+
+function rowToLine(row: Row): Line {
   const line: Line = [];
+  if (row.wrapped) wrappedLines.add(line);
   let last = -1;
   for (let x = 0; x < row.length; x++) {
     const c = row[x];
     if (c.w === 0) continue;
-    if (visible(c)) last = x;
+    if (visible(c) || row.wrapped) last = x;
   }
   if (last < 0) return [];
   let text = '';
