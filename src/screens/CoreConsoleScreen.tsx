@@ -17,10 +17,9 @@ import {
 import { TERM_BG, TERM_FG, TermRow, useCellMetrics } from './TermView';
 import { Header, colors, styles } from './ui';
 import { draftKey, getDraft, setDraft } from '../live/drafts';
-import { joinWrappedLinks, layoutLine, type GridLine } from '../live/grid';
+import { dropWrappedLinks, layoutLine, type GridLine } from '../live/grid';
 import type { Line } from '../live/ansi';
 import type { CorePane } from '../core/CorePane';
-import { continuesOnNextLine } from '../core/terminalBuffer';
 import type { CoreSession, CoreSessionSnapshot } from '../core/CoreSession';
 import { attentionOf, compareTerminals, isPinned, seenMarkUnread, type Attention } from '../core/labels';
 import { layoutBannerKind, unplacedTerminals } from '../core/layout';
@@ -324,8 +323,7 @@ function CoreTerminalView({
     void tick;
     if (!pane) return [];
     const history = pane.buffer.historyLength;
-    const all = pane.buffer.allLines();
-    const laid = all.map((l, i) => {
+    const laid = pane.buffer.allLines().map((l, i) => {
       if (i >= history) return layoutLine(l, TERM_FG, TERM_BG);
       let g = historyLayout.get(l);
       if (!g) {
@@ -334,7 +332,8 @@ function CoreTerminalView({
       }
       return g;
     });
-    return joinWrappedLinks(laid, (i) => continuesOnNextLine(all[i]));
+    const width = pane.buffer.cols;
+    return dropWrappedLinks(laid, (i) => laid[i].cols >= width);
   }, [pane, tick, historyLayout]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
